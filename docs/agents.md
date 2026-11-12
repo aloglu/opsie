@@ -1,0 +1,7 @@
+# AI agents
+
+The **Agents** tab shows how much the AI coding agents on the server have been used: [Claude Code](https://claude.com/claude-code) and Codex, when their folders are in your home. For each: the plan's limits with when they start over, tokens and sessions today and over seven days with a bar per day, and the model used last. Opening one splits the tokens into sent, written and cached, and by model.
+
+It's all read from the session logs the agents keep (`~/.claude/projects`, `~/.codex/sessions`); nothing is sent anywhere. Codex writes its plan limits there too, as of when it was last used. Claude Code doesn't, so its limits are off until you turn on **Claude plan limits** in Settings: then opsie reads the login Claude Code keeps in `~/.claude` and asks `api.anthropic.com` with it, at most every five minutes while the tab is open. The login is only read, never changed or sent anywhere else. Anthropic doesn't document this address, so it may stop answering one day; the rest of the tab doesn't depend on it.
+
+Services paid by use show what a key has spent once opsie has the key: **OpenRouter** (spent today, this week and this month, and how much of the key's limit or of your credits is gone) and **DeepSeek** (the balance left). Add a key from the tab's **Services** card or in Settings; it's kept in `config.toml`, asked about at most every five minutes while the tab is open, and sent only to the service it belongs to.
