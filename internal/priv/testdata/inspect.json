@@ -1,0 +1,91 @@
+[
+ {
+  "Id": "6b38d80f9266c53fc83cfb14022bb37b7d6a3f3940023dc0ece43fa38b519f79",
+  "Name": "/wiki",
+  "Created": "2026-11-10T12:52:49.076393389Z",
+  "State": {
+   "Status": "running",
+   "ExitCode": 0,
+   "OOMKilled": false,
+   "Error": "",
+   "StartedAt": "2026-11-10T12:52:50.922498684Z",
+   "FinishedAt": "0001-01-01T00:00:00Z",
+   "Health": {
+    "Status": "healthy"
+   }
+  },
+  "RestartCount": 0,
+  "Config": {
+   "Image": "ghcr.io/someone/wiki:1.0.0-beta.8",
+   "Labels": {
+    "com.docker.compose.config-hash": "33d92ebccf8c91a14c93cf3b6483dbab51d61494bd7306bb12816307a5db67b1",
+    "com.docker.compose.container-number": "1",
+    "com.docker.compose.depends_on": "",
+    "com.docker.compose.image": "sha256:47bcaafc754ead33984992f93bf3850c64eead3eba128d3f1e708c09df00f6c8",
+    "com.docker.compose.oneoff": "False",
+    "com.docker.compose.project": "wiki",
+    "com.docker.compose.project.config_files": "/home/debian/apps/wiki/compose.yaml",
+    "com.docker.compose.project.working_dir": "/home/debian/apps/wiki",
+    "com.docker.compose.replace": "wiki",
+    "com.docker.compose.service": "wiki",
+    "com.docker.compose.version": "5.7.0"
+   }
+  },
+  "HostConfig": {
+   "RestartPolicy": {
+    "Name": "unless-stopped",
+    "MaximumRetryCount": 0
+   }
+  },
+  "NetworkSettings": {
+   "Ports": {
+    "3000/tcp": [
+     {
+      "HostIp": "127.0.0.1",
+      "HostPort": "8040"
+     }
+    ],
+    "5432/tcp": null
+   }
+  }
+ },
+ {
+  "Id": "5a8b4eb1c91b5f00e641d6f98c672b4048419dd2f00f045f803df5bb8866f797",
+  "Name": "/sync-init",
+  "Created": "2026-11-08T13:23:44.079216765Z",
+  "State": {
+   "Status": "exited",
+   "ExitCode": 0,
+   "OOMKilled": false,
+   "Error": "",
+   "StartedAt": "2026-11-08T13:23:54.351663502Z",
+   "FinishedAt": "2026-11-08T13:23:56.239584045Z"
+  },
+  "RestartCount": 0,
+  "Config": {
+   "Image": "curlimages/curl:8.23.0",
+   "Labels": {
+    "com.docker.compose.config-hash": "2e934aeadc080199e999f1556513ddc337207314681aefd351f73577d4e5c1a7",
+    "com.docker.compose.container-number": "1",
+    "com.docker.compose.depends_on": "couchdb:service_healthy:false",
+    "com.docker.compose.image": "sha256:3b8fde20978e330b401837f24b871ebe2c8d14ff7f07b87990bcd832588a1a75",
+    "com.docker.compose.oneoff": "False",
+    "com.docker.compose.project": "sync",
+    "com.docker.compose.project.config_files": "/home/debian/apps/sync/compose.yaml",
+    "com.docker.compose.project.working_dir": "/home/debian/apps/sync",
+    "com.docker.compose.replace": "sync-init",
+    "com.docker.compose.service": "couchdb-init",
+    "com.docker.compose.version": "5.7.0"
+   }
+  },
+  "HostConfig": {
+   "RestartPolicy": {
+    "Name": "on-failure",
+    "MaximumRetryCount": 0
+   }
+  },
+  "NetworkSettings": {
+   "Ports": {}
+  }
+ }
+]

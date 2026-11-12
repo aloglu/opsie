@@ -1,0 +1,31 @@
+# Builds the release binaries. Runs from .github/workflows/release.yml when
+# a GitHub release is published; it adds the files to that release and
+# leaves the notes you wrote alone, because `opsie update` shows them.
+version: 2
+project_name: opsie
+
+builds:
+  - main: ./cmd/opsie
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Tag }} -X main.channel=release
+
+archives:
+  - formats: [tar.gz]
+    # No version in the name, so releases/latest/download/<name> always
+    # points at the newest build.
+    name_template: "opsie_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  disable: true
+
+release:
+  mode: keep-existing
