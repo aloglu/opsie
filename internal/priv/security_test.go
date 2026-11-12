@@ -3,6 +3,7 @@ package priv
 import (
 	"context"
 	"os"
+	"os/user"
 	"strconv"
 	"strings"
 	"testing"
@@ -198,8 +199,13 @@ func TestServiceUnit(t *testing.T) {
 }
 
 func TestServiceInstallChecksConfigPath(t *testing.T) {
-	for _, bad := range []string{"relative/config.toml", "/etc/shadow", "/home/debian/../../etc/config.toml", "/home/debian/.config/opsie/other.toml", "/home/debian/a b/config.toml"} {
-		if _, err := opServiceInstall(context.Background(), map[string]string{"config": bad, "caller": "debian"}); err == nil || !strings.Contains(err.Error(), "isn't a config file") {
+	// Whoever runs the tests: the account has to exist for the path to be judged.
+	me, err := user.Current()
+	if err != nil {
+		t.Skip(err)
+	}
+	for _, bad := range []string{"relative/config.toml", "/etc/shadow", me.HomeDir + "/../../etc/config.toml", me.HomeDir + "/.config/opsie/other.toml", me.HomeDir + "/a b/config.toml"} {
+		if _, err := opServiceInstall(context.Background(), map[string]string{"config": bad, "caller": me.Username}); err == nil || !strings.Contains(err.Error(), "isn't a config file") {
 			t.Errorf("%q: %v", bad, err)
 		}
 	}
