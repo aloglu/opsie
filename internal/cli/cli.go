@@ -35,6 +35,9 @@ Usage:
                    --install  show it every time you log in
                    --remove   stop showing it
   opsie themes     show the color themes for config.toml
+  opsie uninstall  remove opsie and what it set up on this server
+                   --yes            don't ask first
+                   --keep-settings  leave your settings and history
   opsie daemon     run the background checks (the dashboard installs
                    this as a service; you don't need to run it yourself)
   opsie help       show this help
@@ -94,6 +97,8 @@ func Main(args []string, version, channel string) int {
 		err = runDaemon(env, rest)
 	case "motd", "--motd":
 		err = runMotd(env, rest)
+	case "uninstall":
+		err = runUninstall(env, rest)
 	case "themes":
 		err = tui.PrintThemes(env)
 	default:

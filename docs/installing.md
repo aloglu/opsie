@@ -32,9 +32,15 @@ It shows what changed in every release since yours, installs the newest one, and
 
 ## Uninstall
 
-If you set up the login summary, run `opsie motd --remove`. If you turned on background checks, turn them off from the dashboard first (or `sudo systemctl disable --now opsie && sudo rm /etc/systemd/system/opsie.service && sudo rm -r /usr/local/libexec/opsie /var/lib/opsie`). Then:
-
 ```bash
-rm ~/.local/bin/opsie
-rm -rf ~/.config/opsie ~/.local/state/opsie
+opsie uninstall
 ```
+
+It lists what it's about to remove and asks first: the login summary, the background checks service with its history (this part needs sudo), your settings, the audit log, and opsie itself. `--yes` skips the question, and `--keep-settings` leaves your settings and history for a later install.
+
+Some things are yours and stay:
+
+- **App backups** in `~/opsie-backups`, and the **key** that opens encrypted ones (`~/.config/opsie/backup-key.txt`). Without the key those backups can never be opened, so delete it only when you delete them.
+- **Server settings you changed through opsie**, such as turning off SSH password logins or a sudo rule. They're the server's settings now; removing them would quietly undo your choices. The uninstall names the files.
+
+If something can't be removed, opsie says why and keeps itself, so you can fix it and run the command again.

@@ -12,7 +12,7 @@ opsie runs on Linux (amd64 and arm64).
 curl -fsSL https://raw.githubusercontent.com/aloglu/opsie/main/install.sh | sh
 ```
 
-Then run `opsie`. The [script](install.sh) downloads the latest release, checks it against the release's checksums, and puts it in `~/.local/bin`; it doesn't need sudo or Go. To update later, run `opsie update`.
+Then run `opsie`. The [script](install.sh) downloads the latest release, checks it against the release's checksums, and puts it in `~/.local/bin`; it doesn't need sudo or Go. To update later, run `opsie update`; to remove it, `opsie uninstall`.
 
 More ways to install, and how to remove it, are in **[docs](docs/installing.md)**.
 

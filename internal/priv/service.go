@@ -90,7 +90,10 @@ func opServiceRefresh(ctx context.Context, args map[string]string) (any, error) 
 	return opServiceInstall(ctx, args)
 }
 
-func opServiceRemove(ctx context.Context, _ map[string]string) (any, error) {
+// opServiceRemove turns the background service off. With purge, used when
+// opsie itself is being uninstalled, it also deletes the history and
+// status the service kept.
+func opServiceRemove(ctx context.Context, args map[string]string) (any, error) {
 	_ = run(ctx, "systemctl", "disable", "--now", ServiceUnit)
 	for _, p := range []string{ServiceFile, ServiceBin} {
 		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -98,6 +101,11 @@ func opServiceRemove(ctx context.Context, _ map[string]string) (any, error) {
 		}
 	}
 	_ = os.Remove(filepath.Dir(ServiceBin))
+	if args["purge"] == "1" {
+		if err := os.RemoveAll(ServiceDir); err != nil {
+			return nil, err
+		}
+	}
 	return nil, run(ctx, "systemctl", "daemon-reload")
 }
 
