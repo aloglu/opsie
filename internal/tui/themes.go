@@ -57,7 +57,7 @@ func PrintThemes(env *app.Env) error {
 		}
 	}
 	b.WriteString("\n  " + "Pick one in " + tildePath(env.Paths.ConfigFile()) + ", or in the Settings tab:\n\n")
-	b.WriteString("      " + themeOn(env.Config, g).key.Render(`theme = "flexoki"`) + "\n\n")
+	b.WriteString("      " + themeOn(env.Config, g).key.Render(`theme = "terminal"`) + "\n\n")
 	_, err := lipgloss.Fprint(env.Out, b.String())
 	return err
 }

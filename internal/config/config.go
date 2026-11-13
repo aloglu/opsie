@@ -41,7 +41,7 @@ type Config struct {
 }
 
 // Themes are the color schemes opsie has.
-var Themes = []string{"opsie", "flexoki", "moss", "ocean", "dusk", "mono"}
+var Themes = []string{"opsie", "terminal", "mono"}
 
 // Backgrounds are what Background can be.
 var Backgrounds = []string{"auto", "dark", "light"}

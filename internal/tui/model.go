@@ -165,9 +165,14 @@ type (
 		container string
 		err       error
 	}
-	unlockDoneMsg   struct{ err error }
-	selfUpdatedMsg  struct{ err error }
-	updateFoundMsg  string
+	unlockDoneMsg  struct{ err error }
+	selfUpdatedMsg struct{ err error }
+	updateFoundMsg string
+	// versionCheckedMsg is the answer to a check asked for in Settings.
+	versionCheckedMsg struct {
+		latest string
+		err    error
+	}
 	flashExpiredMsg int
 	countdownMsg    int
 )
@@ -402,6 +407,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.setFlash("Shell in "+msg.container+" ended: "+msg.err.Error(), flashError, 6*time.Second)
 		}
 		return m, nil
+
+	case versionCheckedMsg:
+		return m, m.versionChecked(msg)
 
 	case updateFoundMsg:
 		m.updateVersion = string(msg)

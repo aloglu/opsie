@@ -23,7 +23,7 @@ level = "warn"  # or crit
 		key   string
 		value any
 	}{
-		{"theme", "moss"},                    // new, top level
+		{"theme", "mono"},                    // new, top level
 		{"notify.level", "crit"},             // replaced, comment kept
 		{"notify.ntfy_url", "https://x/y"},   // new, in a table
 		{"thresholds.disk_warn", nil},        // removed
@@ -37,7 +37,7 @@ level = "warn"  # or crit
 	}
 	data, _ := os.ReadFile(path)
 	text := string(data)
-	for _, want := range []string{"# my settings", "refresh_seconds = 5.0   # fast", `theme = "moss"`, `level = "crit"  # or crit`, `ntfy_url = "https://x/y"`, "[thresholds]"} {
+	for _, want := range []string{"# my settings", "refresh_seconds = 5.0   # fast", `theme = "mono"`, `level = "crit"  # or crit`, `ntfy_url = "https://x/y"`, "[thresholds]"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in:\n%s", want, text)
 		}
@@ -50,7 +50,7 @@ level = "warn"  # or crit
 		t.Errorf("theme in a table:\n%s", text)
 	}
 	cfg, err := Load(path)
-	if err != nil || cfg.Theme != "moss" || cfg.Notify.Level != "crit" || cfg.Notify.QuietHours != `say "hi" \` || cfg.RefreshSeconds != 5 {
+	if err != nil || cfg.Theme != "mono" || cfg.Notify.Level != "crit" || cfg.Notify.QuietHours != `say "hi" \` || cfg.RefreshSeconds != 5 {
 		t.Errorf("reloaded %+v %v", cfg, err)
 	}
 	if info, _ := os.Stat(path); info.Mode().Perm() != 0o640 {

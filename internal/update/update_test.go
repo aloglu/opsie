@@ -113,6 +113,43 @@ func TestInstallReleaseRejectsBadChecksum(t *testing.T) {
 	}
 }
 
+func TestCheckAsksEveryTime(t *testing.T) {
+	calls, fail := 0, false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if fail {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Write([]byte(`{"tag_name":"v0.3.0"}`))
+	}))
+	defer srv.Close()
+	old := APIBase
+	APIBase = srv.URL
+	defer func() { APIBase = old }()
+
+	path := filepath.Join(t.TempDir(), "meta.json")
+	if latest, at := Last(path); latest != "" || !at.IsZero() {
+		t.Fatalf("nothing has been checked yet: %s %s", latest, at)
+	}
+	for i := 0; i < 2; i++ {
+		if latest, err := Check(context.Background(), path); latest != "v0.3.0" || err != nil {
+			t.Fatalf("got %s %v", latest, err)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("asked GitHub %d times, want twice", calls)
+	}
+	// A check that fails says so and keeps what was known.
+	fail = true
+	if _, err := Check(context.Background(), path); err == nil {
+		t.Fatal("a refused check should be an error")
+	}
+	if latest, at := Last(path); latest != "v0.3.0" || at.IsZero() {
+		t.Fatalf("forgot what it knew: %s %s", latest, at)
+	}
+}
+
 func TestDailyRemembersForADay(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

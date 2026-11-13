@@ -15,9 +15,10 @@ import (
 // with. Plain text has no color of its own, so it's the terminal's, and
 // opsie never paints the background.
 //
-// Every part of the screen has a color of its own, so a color always
-// means one thing: accent is the selection, nav is what you can press
-// (tabs, keys, links), and each reading has its chart color.
+// A color means one thing: accent is the selection, nav is what you can
+// press (tabs, keys, links), and each reading has its chart color. The
+// readings that come in twos, in and out, read and written, are two
+// shades of one color.
 type theme struct {
 	name string
 	look look
@@ -53,13 +54,9 @@ type look struct {
 
 var (
 	blockBars = []rune(" ▁▂▃▄▅▆▇█")
-	dotBars   = []rune(" ⣀⣤⣶⣿")
 
 	lookRound  = look{"╭", "╮", "╰", "╯", "─", "│", "━", "─", blockBars}
 	lookSquare = look{"┌", "┐", "└", "┘", "─", "│", "█", "░", blockBars}
-	lookHeavy  = look{"┏", "┓", "┗", "┛", "━", "┃", "█", "▁", blockBars}
-	lookDashed = look{"╭", "╮", "╰", "╯", "┄", "┆", "━", "┄", dotBars}
-	lookSoft   = look{"╭", "╮", "╰", "╯", "─", "│", "▄", "▁", blockBars}
 )
 
 // ground is what the colors are drawn on: a dark terminal, a light one, or
@@ -72,86 +69,143 @@ const (
 	groundLight
 )
 
-// tone is how colors are mixed for a ground: how light, how strong, what
-// text goes on top of them, and how light the greys are. On a dark
-// terminal colors are bright and full; on a light one they're deep. When
-// the ground isn't known they sit in the middle, where they read on both.
+// tone is how colors are mixed for a ground: how light and how strong a
+// color is before its own ink has a say, how far it may be moved from
+// there (lo to hi, where it still reads), what text goes on top of it,
+// and how light the greys are. On a dark terminal colors are bright; on
+// a light one they're deep. When the ground isn't known they sit in the
+// narrow middle that reads on both.
 //
-// Colors are as strong as a screen can show at their lightness, up to c:
-// lighter than this and they wash out into pastels, since a screen can
-// only make a color lighter by adding white. sun is how much lighter the
-// yellows and greens are than the blues and reds, as they are in the
-// rainbow; without it a yellow is a brown.
+// lift is how much of an ink's own lightness the ground has room for,
+// and soft is where the quieter of two shades goes: towards the ground.
 type tone struct {
-	l, c, sun    float64
+	l, c, lo, hi float64
+	lift, soft   float64
 	ink          string
 	grey, border float64
 }
 
 var tones = map[ground]tone{
-	groundDark:    {l: 0.70, c: 0.20, sun: 0.07, ink: "#101010", grey: 0.68, border: 0.46},
-	groundLight:   {l: 0.53, c: 0.19, sun: 0, ink: "#ffffff", grey: 0.50, border: 0.72},
-	groundUnknown: {l: 0.61, c: 0.17, sun: 0, ink: "#111111", grey: 0.60, border: 0.60},
+	groundDark:    {l: 0.72, c: 0.19, lo: 0.62, hi: 0.90, lift: 1, soft: -0.13, ink: "#101010", grey: 0.68, border: 0.46},
+	groundLight:   {l: 0.50, c: 0.19, lo: 0.36, hi: 0.60, lift: 0.6, soft: 0.12, ink: "#ffffff", grey: 0.50, border: 0.72},
+	groundUnknown: {l: 0.60, c: 0.17, lo: 0.52, hi: 0.64, lift: 0.3, soft: -0.08, ink: "#111111", grey: 0.60, border: 0.60},
 }
 
-// palette is a theme's colors, each a hue on the OKLCH color wheel; they
-// become colors at the tone of the ground. plain is no hue: the
-// terminal's own text color.
+// ink is one color of a palette, before it's mixed for a ground. Most are
+// a hue on the OKLCH color wheel, with how light and how strong they are
+// next to the others: colors that all have one lightness and one
+// strength look made by a machine, so the ones that lead are lifted and
+// the ones that only inform are quiet. The rest are the terminal's own:
+// its text color, a grey, or one of its sixteen colors.
+type ink struct {
+	kind inkKind
+	// h is the hue, in degrees; up how much lighter than the tone it is,
+	// and c how strong, 1 being the tone's.
+	h, up, c float64
+	// quiet is the second of two shades of one hue.
+	quiet bool
+	// n is which of the terminal's sixteen colors.
+	n int
+}
+
+type inkKind int
+
+const (
+	inkHue inkKind = iota
+	// inkBare is no color at all: the terminal's own text.
+	inkBare
+	// inkGrey is the theme's grey.
+	inkGrey
+	// inkANSI is one of the terminal's sixteen colors, whatever its theme
+	// makes of it.
+	inkANSI
+)
+
+func hue(h float64) ink { return ink{h: h, c: 1} }
+
+// lift makes an ink lighter than the rest, as yellows, greens and cyans
+// are in the rainbow; without it a yellow is a brown.
+func (i ink) lift(by float64) ink { i.up = by; return i }
+
+// strength is how strong an ink is next to the rest.
+func (i ink) strength(c float64) ink { i.c = c; return i }
+
+// soft is the quieter shade of an ink, for the second of a pair.
+func (i ink) soft() ink { i.quiet = true; i.c *= 0.8; return i }
+
+func ansi16(n int) ink { return ink{kind: inkANSI, n: n} }
+
+var (
+	bare = ink{kind: inkBare}
+	grey = ink{kind: inkGrey}
+)
+
+// palette is a theme's inks; they become colors at the tone of the
+// ground.
 type palette struct {
 	// accent is the selection and, blended into accent2, the wordmark.
-	accent, accent2 float64
+	accent, accent2 ink
 	// nav is the tabs, key hints and links.
-	nav float64
-	// The charts and bars, one hue per reading.
-	cpu, mem, disk, rx, tx float64
-	// wr is what's written to the disks; what's read is in disk's hue.
-	wr                     float64
-	ok, info, warn, danger float64
-	// tint is the hue of the greys, and vivid how strong the colors are
-	// next to the other themes'.
-	tint, vivid float64
-	look        look
+	nav ink
+	// The charts and bars. In and out are two shades of one hue, and so
+	// are read (disk) and written (wr).
+	cpu, mem, disk, wr, rx, tx ink
+	ok, info, warn, danger     ink
+	// tint is the hue of the greys, or -1 for none.
+	tint float64
+	look look
 }
 
-const plain = -1
+// The terminal's sixteen colors, by their usual names.
+const (
+	ansiRed = 1 + iota
+	ansiGreen
+	ansiYellow
+	ansiBlue
+	ansiMagenta
+	ansiCyan
+	ansiBright = 8
+)
 
-// roles are the hues that each mean something different, and so have to
-// look different within a theme. accent2 isn't one: it only ever shows as
-// the far end of the wordmark.
-func (p palette) roles() map[string]float64 {
-	return map[string]float64{
-		"accent": p.accent, "nav": p.nav,
-		"cpu": p.cpu, "mem": p.mem, "disk": p.disk, "rx": p.rx, "tx": p.tx,
-		"wr": p.wr,
-		"ok": p.ok, "info": p.info, "warn": p.warn, "danger": p.danger,
-	}
-}
-
-// A theme's accent gives it its color (teal, orange, green, blue, pink or
-// none); the other hues are spread around the wheel from there, as far
-// from each other as they'll go, and the chart hues keep well clear of the
-// warning ones they turn into. Its look gives it its shape.
 var palettes = map[string]palette{
-	// teal to violet, cool slate greys, rounded
-	"opsie": {accent: 190, accent2: 295, nav: 295, cpu: 330, mem: 268, disk: 120, rx: 50, tx: 0, wr: 312,
-		ok: 150, info: 240, warn: 82, danger: 25, tint: 240, vivid: 1, look: lookRound},
-	// Steph Ango's Flexoki (stephango.com/flexoki): its eight inks on warm
-	// paper greys, a little quieter than the rest, square
-	"flexoki": {accent: 50, accent2: 350, nav: 350, cpu: 190, mem: 295, disk: 222, rx: 322, tx: 152, wr: 274,
-		ok: 122, info: 255, warn: 88, danger: 25, tint: 80, vivid: 0.9, look: lookSquare},
-	// green to olive, lichen greys, soft bars
-	"moss": {accent: 138, accent2: 105, nav: 325, cpu: 290, mem: 350, disk: 225, rx: 55, tx: 108, wr: 158,
-		ok: 185, info: 255, warn: 80, danger: 28, tint: 125, vivid: 0.95, look: lookSoft},
-	// blue to cyan, blue-grey, heavy lines
-	"ocean": {accent: 250, accent2: 205, nav: 205, cpu: 330, mem: 125, disk: 278, rx: 50, tx: 355, wr: 144,
-		ok: 160, info: 300, warn: 82, danger: 22, tint: 250, vivid: 1.05, look: lookHeavy},
-	// pink to violet, mauve greys, dashed lines and dotted charts, the
-	// strongest colors
-	"dusk": {accent: 345, accent2: 290, nav: 290, cpu: 130, mem: 318, disk: 215, rx: 45, tx: 105, wr: 2,
-		ok: 170, info: 250, warn: 76, danger: 20, tint: 320, vivid: 1.15, look: lookDashed},
-	// no color but the warnings: everything else is the terminal's own text
-	"mono": {accent: plain, accent2: plain, nav: plain, cpu: plain, mem: plain, disk: plain, rx: plain, tx: plain, wr: plain,
-		ok: 150, info: 245, warn: 80, danger: 25, tint: plain, vivid: 0.45, look: lookSquare},
+	// A city at night: blue, violet and cyan lead, pink, teal and orange
+	// are the lights. The statuses are the usual four, with info a quiet
+	// steel so it doesn't pass for the selection. Rounded.
+	"opsie": {
+		accent: hue(262), accent2: hue(325),
+		nav: hue(300).lift(0.03).strength(0.9),
+		cpu: hue(216).lift(0.08), mem: hue(350).lift(0.02),
+		disk: hue(172).lift(0.06), wr: hue(172).lift(0.06).soft(),
+		rx: hue(55).lift(0.06), tx: hue(55).lift(0.06).soft(),
+		ok: hue(142).lift(0.08), info: hue(240).strength(0.45),
+		warn: hue(92).lift(0.12), danger: hue(22),
+		tint: 265, look: lookRound,
+	},
+	// The terminal's own sixteen colors, so opsie looks like the rest of
+	// what's in it. There are only six hues among them, so the readings
+	// borrow from the statuses, and the selection is the terminal's
+	// colors swapped. Square.
+	"terminal": {
+		accent: bare, accent2: bare,
+		nav: ansi16(ansiBright + ansiMagenta),
+		cpu: ansi16(ansiCyan), mem: ansi16(ansiMagenta),
+		disk: ansi16(ansiBright + ansiGreen), wr: ansi16(ansiGreen),
+		rx: ansi16(ansiBright + ansiBlue), tx: ansi16(ansiBlue),
+		ok: ansi16(ansiGreen), info: ansi16(ansiBlue),
+		warn: ansi16(ansiYellow), danger: ansi16(ansiRed),
+		tint: -1, look: lookSquare,
+	},
+	// No color but the statuses, and those quiet: everything else is the
+	// terminal's own text. Out and written are the readings that can't be
+	// told from their pair by place, so they're grey next to the other's
+	// plain text.
+	"mono": {
+		accent: bare, accent2: grey, nav: bare,
+		cpu: bare, mem: bare, disk: bare, wr: grey, rx: bare, tx: grey,
+		ok: hue(150).strength(0.5), info: hue(245).strength(0.5),
+		warn: hue(85).lift(0.06).strength(0.5), danger: hue(25).strength(0.5),
+		tint: -1, look: lookSquare,
+	},
 }
 
 func newTheme() theme { return themeNamed("opsie", groundUnknown) }
@@ -164,27 +218,36 @@ func themeNamed(name string, g ground) theme {
 		name, p = "opsie", palettes["opsie"]
 	}
 	tn := tones[g]
-	col := func(h float64) color.Color {
-		if h == plain {
-			return lipgloss.NoColor{}
-		}
-		sun := tn.sun * max(math.Cos((h-105)*math.Pi/180), 0)
-		return lipgloss.Color(oklch(tn.l+sun, tn.c*p.vivid, h))
-	}
-	grey := func(l float64) color.Color {
-		if p.tint == plain {
+	shade := func(l float64) color.Color {
+		if p.tint < 0 {
 			return lipgloss.Color(oklch(l, 0, 0))
 		}
-		return lipgloss.Color(oklch(l, 0.022, p.tint))
+		return lipgloss.Color(oklch(l, 0.02, p.tint))
+	}
+	muted := shade(tn.grey)
+	col := func(i ink) color.Color {
+		switch i.kind {
+		case inkBare:
+			return lipgloss.NoColor{}
+		case inkGrey:
+			return muted
+		case inkANSI:
+			return lipgloss.ANSIColor(i.n)
+		}
+		l := tn.l + i.up*tn.lift
+		if i.quiet {
+			l += tn.soft
+		}
+		return lipgloss.Color(oklch(min(max(l, tn.lo), tn.hi), tn.c*i.c, i.h))
 	}
 	t := theme{
 		name:    name,
 		look:    p.look,
 		text:    lipgloss.NoColor{},
-		muted:   grey(tn.grey),
-		faint:   grey(tn.grey),
-		border:  grey(tn.border),
-		track:   grey(tn.border),
+		muted:   muted,
+		faint:   muted,
+		border:  shade(tn.border),
+		track:   shade(tn.border),
 		accent:  col(p.accent),
 		accent2: col(p.accent2),
 		nav:     col(p.nav),
@@ -198,11 +261,6 @@ func themeNamed(name string, g ground) theme {
 		info:    col(p.info),
 		warn:    col(p.warn),
 		danger:  col(p.danger),
-	}
-	if p.accent == plain {
-		// Out and written are the readings that can't be told from their
-		// pair by place, so they're grey next to the other's plain text.
-		t.accent2, t.tx, t.wr = t.muted, t.muted, t.muted
 	}
 	fg := func(c color.Color) lipgloss.Style { return lipgloss.NewStyle().Foreground(c) }
 	t.bold = lipgloss.NewStyle().Bold(true)
@@ -220,8 +278,14 @@ func themeNamed(name string, g ground) theme {
 	t.backdrop = fg(t.border).Faint(true)
 	on := lipgloss.Color(tn.ink)
 	t.button = lipgloss.NewStyle().Foreground(on).Background(t.muted).Padding(0, 1)
-	t.buttonDanger = lipgloss.NewStyle().Foreground(on).Background(t.danger).Bold(true).Padding(0, 1)
-	if p.accent == plain {
+	if p.danger.kind == inkANSI {
+		// What reads on one of the terminal's colors is up to its theme;
+		// its own background always does.
+		t.buttonDanger = fg(t.danger).Reverse(true).Bold(true).Padding(0, 1)
+	} else {
+		t.buttonDanger = lipgloss.NewStyle().Foreground(on).Background(t.danger).Bold(true).Padding(0, 1)
+	}
+	if p.accent.kind == inkBare {
 		// The terminal's own colors, swapped.
 		t.buttonFocus = lipgloss.NewStyle().Reverse(true).Bold(true).Padding(0, 1)
 		t.selected = lipgloss.NewStyle().Reverse(true)

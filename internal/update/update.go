@@ -176,6 +176,25 @@ func Daily(ctx context.Context, metaPath, current string) (string, bool) {
 	return m.Latest, Newer(current, m.Latest)
 }
 
+// Check asks GitHub for the newest release now, whatever was last
+// remembered, and remembers the answer. An error leaves what was
+// remembered as it was.
+func Check(ctx context.Context, metaPath string) (string, error) {
+	var latest Release
+	if err := getJSON(ctx, APIBase+"/repos/"+app.Repo+"/releases/latest", &latest); err != nil {
+		return "", err
+	}
+	_ = saveMeta(metaPath, meta{CheckedAt: time.Now(), Latest: latest.Tag})
+	return latest.Tag, nil
+}
+
+// Last is the newest release seen so far and when GitHub was last
+// asked; both are empty before the first check.
+func Last(metaPath string) (string, time.Time) {
+	m := loadMeta(metaPath)
+	return m.Latest, m.CheckedAt
+}
+
 // Forget clears the remembered latest version, after an update.
 func Forget(metaPath, installed string) {
 	_ = saveMeta(metaPath, meta{CheckedAt: time.Now(), Latest: installed})

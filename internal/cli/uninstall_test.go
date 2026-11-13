@@ -20,7 +20,7 @@ func fakeInstall(t *testing.T) (*uninstaller, *bytes.Buffer, *int) {
 	exe := filepath.Join(home, ".local/bin/opsie")
 	for path, text := range map[string]string{
 		exe:                                    "binary",
-		paths.ConfigFile():                     "theme = \"moss\"\n",
+		paths.ConfigFile():                     "theme = \"mono\"\n",
 		paths.BackupKey():                      "AGE-SECRET-KEY-1EXAMPLE\n",
 		paths.AuditLog():                       "{}\n",
 		filepath.Join(paths.Backups, "a.tar"):  "backup",

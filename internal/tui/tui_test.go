@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"github.com/aloglu/opsie/internal/update"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -1152,12 +1155,12 @@ func TestThemes(t *testing.T) {
 		}
 	}
 	contrast := func(a, b float64) float64 { return (max(a, b) + 0.05) / (min(a, b) + 0.05) }
-	accents := map[float64]string{}
-	for name, p := range palettes {
-		if other, dup := accents[p.accent]; dup {
-			t.Errorf("%s and %s share an accent", name, other)
+	for name := range palettes {
+		if name == "terminal" {
+			// Its colors are the terminal's, and what they are is up to
+			// the terminal's theme.
+			continue
 		}
-		accents[p.accent] = name
 		for g, gname := range map[ground]string{groundDark: "dark", groundLight: "light", groundUnknown: "unknown"} {
 			th := themeNamed(name, g)
 			roles := map[string]colorT{
@@ -1181,7 +1184,8 @@ func TestThemes(t *testing.T) {
 					t.Errorf("%s on %s: %s is %.1f:1 on dark and %.1f:1 on light", name, gname, a, onDark, onLight)
 				}
 				// Within a theme every part has its own color: the
-				// selection's isn't a chart's, a chart's isn't a status's.
+				// selection's isn't a chart's, a chart's isn't a status's,
+				// and the two shades of a pair are told apart.
 				// Distances are in OKLab, where 0.05 is about as close as
 				// two colors of one brightness can be and still be told
 				// apart at a glance. mono has no colors to tell apart.
@@ -1304,14 +1308,14 @@ func TestSettingsSaveToTheFile(t *testing.T) {
 
 	// A choice saves straight away and applies.
 	m.openItem(tabSettings, "set:theme")
-	var flexoki health.Fix
+	var terminal health.Fix
 	for _, f := range m.detailFor(m.modal.key, 40).fixes {
-		if f.Label == "flexoki" {
-			flexoki = f
+		if f.Label == "terminal" {
+			terminal = f
 		}
 	}
-	m.chooseFix(flexoki)
-	if m.th.name != "flexoki" || m.env.Config.Theme != "flexoki" {
+	m.chooseFix(terminal)
+	if m.th.name != "terminal" || m.env.Config.Theme != "terminal" {
 		t.Fatalf("theme not applied: %s", m.th.name)
 	}
 
@@ -1345,7 +1349,7 @@ func TestSettingsSaveToTheFile(t *testing.T) {
 		t.Fatalf("check_seconds %d", m.env.Config.CheckSeconds)
 	}
 	data, _ := os.ReadFile(path)
-	for _, want := range []string{`theme = "flexoki"`, "check_seconds = 60\n", `ntfy_url = "https://ntfy.sh/a-long-secret-topic"`} {
+	for _, want := range []string{`theme = "terminal"`, "check_seconds = 60\n", `ntfy_url = "https://ntfy.sh/a-long-secret-topic"`} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("file lacks %q:\n%s", want, data)
 		}
@@ -1462,7 +1466,7 @@ func TestHistoryCharts(t *testing.T) {
 		t.Log("\n" + ansi.Strip(m.render()))
 	}
 	// What the disks read and wrote has a history too, and the Overview's
-	// Disks card draws it live under the bars.
+	// Disks card draws it live.
 	m.openItem(tabOverview, "history:io")
 	if m.modal == nil || m.modal.key != "history:io" {
 		t.Fatalf("the disks' activity should open as itself: %+v", m.modal)
@@ -1910,5 +1914,53 @@ func TestChartPeakLeavesHeadroom(t *testing.T) {
 		if top[len(top)-1] == ' ' {
 			t.Errorf("%s: the peak doesn't reach the top row", name)
 		}
+	}
+}
+
+func TestVersionInSettings(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 60, 200
+	m.switchTab(tabSettings)
+	if page := ansi.Strip(m.render()); !strings.Contains(page, "Version") || !strings.Contains(page, "dev build") {
+		t.Fatalf("a dev build should say so:\n%s", page)
+	}
+	// An installed release says where it stands, and offers the update
+	// only once a newer one is known.
+	m.env.Dev, m.env.Version = false, "v1.0.0"
+	m.openItem(tabSettings, "set:version")
+	d := m.detailFor(m.modal.key, 50)
+	if body := ansi.Strip(strings.Join(d.body, "\n")); !strings.Contains(body, "v1.0.0") || !strings.Contains(body, "never") {
+		t.Errorf("before a check:\n%s", body)
+	}
+	if len(d.fixes) != 1 || d.fixes[0].Special != "update:check" {
+		t.Fatalf("fixes %+v", d.fixes)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"tag_name":"v1.1.0"}`))
+	}))
+	defer srv.Close()
+	old := update.APIBase
+	update.APIBase = srv.URL
+	defer func() { update.APIBase = old }()
+	cmd := m.chooseFix(d.fixes[0])
+	if m.modal.stage != stageRunning {
+		t.Fatal("the popup should wait for the answer")
+	}
+	m.Update(cmd())
+	if m.modal == nil || m.modal.stage != stageView || m.updateVersion != "v1.1.0" {
+		t.Fatalf("after the check: %+v, update %q", m.modal, m.updateVersion)
+	}
+	d = m.detailFor(m.modal.key, 50)
+	if len(d.fixes) != 2 || d.fixes[0].Special != "update" || !strings.Contains(ansi.Strip(d.headline), "v1.1.0 is out") {
+		t.Errorf("a newer version should lead with the update: %q %+v", ansi.Strip(d.headline), d.fixes)
+	}
+	if page := ansi.Strip(m.render()); !strings.Contains(page, "v1.1.0 is out") {
+		t.Errorf("the list should say a newer one is out:\n%s", page)
+	}
+	// A check that fails says so in the popup.
+	srv.Close()
+	m.Update(m.chooseFix(d.fixes[1])())
+	if m.modal == nil || !strings.Contains(m.modal.err, "Couldn't check") {
+		t.Errorf("a failed check: %+v", m.modal)
 	}
 }

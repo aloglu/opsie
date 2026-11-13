@@ -348,7 +348,7 @@ func (m *Model) netCard(inner int) cardSpec {
 	return s
 }
 
-// sinceBoot is the line of totals under a pair of charts. It says what
+// sinceBoot is the line of totals over a pair of charts. It says what
 // they're totals of where there's room to.
 func (m *Model) sinceBoot(totals string, inner int) string {
 	if lipgloss.Width("since boot "+totals) <= inner {
@@ -357,68 +357,31 @@ func (m *Model) sinceBoot(totals string, inner int) string {
 	return m.th.dim.Render(fit(totals, inner))
 }
 
-// diskCard is how full each disk is, over charts of what they're reading
-// and writing.
+// diskCard is charts of what the disks are reading and writing. How full
+// each one is belongs to Storage.
 func (m *Model) diskCard(inner int) cardSpec {
 	t := m.th
 	s := cardSpec{title: "Disks", selected: -1, focus: noFocus()}
-	if m.haveSnap && len(m.snap.IO.Devices) > 0 {
-		// The card opens what the disks are doing; each bar, its own disk.
-		s.open = "history:io"
-		if io := m.snap.IO; io.Ready {
-			s.badge = t.dim.Render(fmt.Sprintf("%.0f%% busy", io.Busy))
-		}
-	}
 	if !m.haveSnap {
 		s.body = []string{t.dim.Render("Sampling…")}
 		return s
 	}
-	if len(m.snap.Disks) == 0 {
-		s.body = []string{t.dim.Render("No disks found")}
-		return s
-	}
-	th := m.env.Config.Thresholds
-	nameW := 0
-	for _, d := range m.snap.Disks {
-		nameW = max(nameW, lipgloss.Width(d.Mount))
-	}
-	nameW = min(nameW, max(inner/3, 6))
-	showSizes := inner >= 44
-	for _, d := range m.snap.Disks {
-		pct := fmt.Sprintf("%4.0f%%", d.Percent)
-		sizes := ""
-		if showSizes {
-			sizes = " " + t.dim.Render(fmt.Sprintf("%9s", human.Bytes(d.Used)+"/"+human.Bytes(d.Total)))
-		}
-		gw := inner - nameW - 1 - len(pct) - lipgloss.Width(sizes) - 1
-		line := t.subtle.Render(fit(d.Mount, nameW)) + " "
-		if gw >= 3 {
-			line += t.gauge(d.Percent, gw, t.level(t.disk, d.Percent, th.DiskWarn, th.DiskCrit)) + " "
-		}
-		line += pct + sizes
-		id := "disk:" + d.Mount
-		s.hits = append(s.hits, hit{x: -2, y: len(s.body), w: inner + 4, h: 1, click: func(m *Model) tea.Cmd { return m.openItem(tabOverview, id) }})
-		s.body = append(s.body, line)
-	}
-	s.body = append(s.body, m.ioLines(inner)...)
-	return s
-}
-
-// ioLines is what's been read and written, over charts of it. It's empty where
-// the system doesn't say.
-func (m *Model) ioLines(inner int) []string {
-	t := m.th
 	io := m.snap.IO
 	switch {
-	case !m.haveSnap || len(io.Devices) == 0:
-		return nil
+	case len(io.Devices) == 0:
+		s.body = []string{t.dim.Render("No disks found")}
+		return s
 	case !io.Ready:
-		return []string{t.dim.Render("Measuring…")}
+		s.body = []string{t.dim.Render("Measuring…")}
+		return s
 	}
-	body := m.flowCharts(inner, 4+m.grow+m.pad,
+	s.open = "history:io"
+	s.badge = t.dim.Render(fmt.Sprintf("%.0f%% busy", io.Busy))
+	s.body = []string{m.sinceBoot(fmt.Sprintf("R %s  W %s", human.Bytes(io.ReadTotal), human.Bytes(io.WriteTotal)), inner)}
+	s.body = append(s.body, m.flowCharts(inner, 4+m.grow+m.pad,
 		flow{mark: "R", c: t.disk, past: m.rd, rate: io.ReadRate},
-		flow{mark: "W", c: t.wr, past: m.wr, rate: io.WriteRate})
-	return append([]string{m.sinceBoot(fmt.Sprintf("R %s  W %s", human.Bytes(io.ReadTotal), human.Bytes(io.WriteTotal)), inner)}, body...)
+		flow{mark: "W", c: t.wr, past: m.wr, rate: io.WriteRate})...)
+	return s
 }
 
 // flow is one of a set of rates drawn together: read and written, in and
@@ -430,25 +393,24 @@ type flow struct {
 	rate float64
 }
 
-// flowCharts draws rates as charts one above the other on one scale,
-// each with its mark in front and its latest value after. They share
-// rows evenly, so they read against each other; a row that's left over
-// goes between them.
+// flowCharts draws rates as charts one above the other on one scale, as
+// wide as the card, under a line that has each one's mark, in its color,
+// and its latest value. They share rows evenly, so they read against
+// each other; a row that's left over goes between them.
 func (m *Model) flowCharts(inner, rows int, flows ...flow) []string {
-	const valueW = 9
-	cw := inner - 2 - 1 - valueW
-	var body []string
-	if cw < 4 {
-		for _, f := range flows {
-			body = append(body, f.mark+" "+human.Rate(f.rate))
-		}
+	var now []string
+	for _, f := range flows {
+		now = append(now, lipgloss.NewStyle().Foreground(f.c).Bold(true).Render(f.mark)+" "+human.Rate(f.rate))
+	}
+	body := []string{fit(strings.Join(now, "  "), inner)}
+	if inner < 4 {
 		return body
 	}
 	spare := rows % len(flows)
 	rows /= len(flows)
 	top := 1024.0
 	for _, f := range flows {
-		for _, v := range f.past[max(len(f.past)-cw, 0):] {
+		for _, v := range f.past[max(len(f.past)-inner, 0):] {
 			top = max(top, v)
 		}
 	}
@@ -458,14 +420,7 @@ func (m *Model) flowCharts(inner, rows int, flows ...flow) []string {
 				body = append(body, "")
 			}
 		}
-		for i, row := range m.th.chart(f.past, cw, rows, top, func(float64) colorT { return f.c }) {
-			label, value := "  ", strings.Repeat(" ", valueW)
-			if i == 0 {
-				label = lipgloss.NewStyle().Foreground(f.c).Bold(true).Render(f.mark) + " "
-				value = fmt.Sprintf("%*s", valueW, human.Rate(f.rate))
-			}
-			body = append(body, label+row+" "+value)
-		}
+		body = append(body, m.th.chart(f.past, inner, rows, top, func(float64) colorT { return f.c })...)
 	}
 	return body
 }

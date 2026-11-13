@@ -42,7 +42,7 @@ type settingGroup struct {
 var settingGroups = []settingGroup{
 	{"Look", []setting{
 		{key: "theme", label: "Theme", kind: "choice", options: config.Themes,
-			help: "opsie's look. Each theme has its own colors and its own shapes: teal and rounded (opsie), Flexoki's inks in square boxes (flexoki), green with soft bars (moss), blue with heavy lines (ocean), pink with dashed lines and dotted charts (dusk), or no color at all (mono). Text and the background are always your terminal's own."},
+			help: "opsie's look. Each theme has its own colors and its own shapes: opsie's own, blue and violet on rounded cards (opsie), your terminal's sixteen colors in square boxes (terminal), or no color but the statuses (mono). Text and the background are always your terminal's own."},
 		{key: "background", label: "Background", kind: "choice", options: config.Backgrounds,
 			help: "Colors are mixed for the terminal's background: light and clear on a dark one, deep on a light one. auto asks the terminal which it has; if yours doesn't answer and the colors look washed out, say dark or light here."},
 	}},
@@ -249,6 +249,9 @@ func (m *Model) settingsSections(inner int) []section {
 		}
 		out = append(out, sec)
 	}
+	out = append(out, section{title: "opsie", entries: []entry{
+		{id: "set:version", lines: m.itemRow("Version", m.versionWord(), inner)},
+	}})
 	bg := section{title: "Background"}
 	if m.haveWatcher {
 		word := "off"
@@ -267,8 +270,20 @@ func (m *Model) settingsSections(inner int) []section {
 		}
 	}
 	bg.entries = append(bg.entries, entry{id: "audit", lines: m.itemRow("Actions taken", t.subtle.Render(m.lastAction()), inner)})
-	bg.outro = wrap(t.dim.Render("Saved in "+tildePath(m.env.Paths.ConfigFile())+", which you can also edit by hand. The background checks pick changes up on their own."), inner)
-	return append(out, bg)
+	out = append(out, bg)
+	// The sections are in the order of their names, so one is found
+	// without knowing what's in it.
+	slices.SortStableFunc(out, func(a, b section) int {
+		return strings.Compare(strings.ToLower(a.title), strings.ToLower(b.title))
+	})
+	// Where it's all saved is the last thing on the page, whichever
+	// section that is.
+	last := &out[len(out)-1]
+	if len(last.outro) > 0 {
+		last.outro = append(last.outro, "")
+	}
+	last.outro = append(last.outro, wrap(t.dim.Render("Saved in "+tildePath(m.env.Paths.ConfigFile())+", which you can also edit by hand. The background checks pick changes up on their own."), inner)...)
+	return out
 }
 
 func (m *Model) settingDetail(key string, b *detailBuilder) detail {
@@ -283,6 +298,8 @@ func (m *Model) settingDetail(key string, b *detailBuilder) detail {
 	case "weekly-now":
 		b.text("Sends the weekly summary to "+strings.Join(health.Targets(m.env.Config.Notify), " and ")+" now, so you can see what it looks like. It's built from what the background checks recorded.", plain)
 		return detail{title: "Weekly summary", body: b.body, fixes: []health.Fix{{Label: "Send it now", Special: "notify:weekly"}}}
+	case "version":
+		return m.versionDetail(b)
 	case "motd":
 		if m.watcher.Motd {
 			b.text("A short summary of the server shows each time you log in over SSH.", plain)

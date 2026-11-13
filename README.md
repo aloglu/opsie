@@ -27,7 +27,7 @@ More ways to install, and how to remove it, are in **[docs](docs/installing.md)*
 - **Security and updates:** who can log in, what's exposed to the internet, the firewall, and pending updates.
 - **AI agents:** how much Claude Code and Codex have been used on the server, and what OpenRouter or DeepSeek keys have spent.
 - **Background checks:** an optional service that watches while you're away and alerts through ntfy, Telegram or a webhook.
-- **Phone and desktop:** the layout follows the screen, nothing needs Ctrl or Alt, and everything can be tapped. Six themes for dark or light terminals.
+- **Phone and desktop:** the layout follows the screen, nothing needs Ctrl or Alt, and everything can be tapped. Three themes for dark or light terminals.
 
 ## Documentation
 

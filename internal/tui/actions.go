@@ -54,6 +54,8 @@ func (m *Model) runFix(f health.Fix) tea.Cmd {
 		}
 		cmd := exec.Command(exe, "update", "--from-app")
 		return tea.ExecProcess(cmd, func(err error) tea.Msg { return selfUpdatedMsg{err: err} })
+	case f.Special == "update:check":
+		return m.checkVersion()
 	case f.Special == "notify:test":
 		return m.testAlert(f)
 	case f.Special == "notify:weekly":
