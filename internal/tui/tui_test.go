@@ -41,6 +41,7 @@ func testModel(t *testing.T) *Model {
 			{Mount: "/", Device: "/dev/sda1", FSType: "ext4", Total: 40 << 30, Used: 37 << 30, Free: 3 << 30, Percent: 92},
 			{Mount: "/var/lib/a-rather-long-mount-name", Device: "/dev/sdb1", Total: 100 << 30, Used: 10 << 30, Percent: 10},
 		},
+		IO:   metrics.DiskIO{Ready: true, ReadRate: 2.5e5, WriteRate: 4.2e6, ReadTotal: 80 << 30, WriteTotal: 170 << 30, Busy: 12, Devices: []string{"sda", "sdb"}},
 		Net:  metrics.Net{Ready: true, RxRate: 1.5e6, TxRate: 3e4, RxTotal: 12 << 30, TxTotal: 3 << 30, Interfaces: []string{"ens3"}},
 		Host: metrics.Host{Hostname: "a-very-long-hostname.example.com", OS: "Debian GNU/Linux 13 (trixie)", Kernel: "6.12.115+deb13.1-cloud-amd64", Uptime: 147 * time.Hour, Boot: time.Now().Add(-147 * time.Hour)},
 		Sessions: []metrics.Session{{ID: "60", User: "debian", Terminal: "pts/0", From: "203.0.113.50", Started: time.Now()},
@@ -50,8 +51,11 @@ func testModel(t *testing.T) *Model {
 	for i := 0; i < 200; i++ {
 		m.cpu.push(float64(i % 100))
 		m.mem.push(60)
+		m.swap.push(68)
 		m.rx.push(float64(i * 1000))
 		m.tx.push(500)
+		m.rd.push(float64(i%40) * 5e4)
+		m.wr.push(float64(i%7) * 9e5)
 	}
 	m.snap, m.haveSnap = snap, true
 	m.facts = facts.Facts{
@@ -166,7 +170,7 @@ func testModel(t *testing.T) *Model {
 	for i := 7*24*60 - 5; i >= 0; i -= 5 {
 		at := m.now.Add(-time.Duration(i) * time.Minute)
 		wave := float64((i / 60) % 24)
-		m.hist.samples = append(m.hist.samples, history.Sample{At: at, CPU: 10 + wave*3, Mem: 60 + wave, Load: 0.2, Rx: 1e5 * wave, Tx: 2e4 * wave,
+		m.hist.samples = append(m.hist.samples, history.Sample{At: at, CPU: 10 + wave*3, Mem: 60 + wave, Load: 0.2, Rx: 1e5 * wave, Tx: 2e4 * wave, IO: []float64{3e4 * wave, 5e5 * wave},
 			Disks: map[string]float64{"/": 80 + float64(i)/10080*-10}})
 	}
 	m.hist.at = time.Now()
@@ -764,13 +768,76 @@ func TestVitalServicesCantBeStopped(t *testing.T) {
 	}
 }
 
+// On a screen with room for them, the Processes tab's charts are its
+// first items: CPU is where the selection starts, and each opens its
+// history.
+func TestProcsChartsAreItems(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 130, 40
+	m.switchTab(tabProcs)
+	if ids := m.procItems(); len(ids) != 6 || ids[0] != "load" || ids[1] != "memory" || ids[2] != "pid:4242" {
+		t.Fatalf("items: %v", ids)
+	}
+	edge, _, _ := strings.Cut(m.th.accentText.Render("x"), "x")
+	lit := func() string {
+		for _, line := range strings.Split(m.render(), "\n") {
+			for _, title := range []string{"CPU", "Memory", "Processes"} {
+				if strings.Contains(line, edge+"╭") && strings.Contains(ansi.Strip(line), "─ "+title+" ") {
+					_, after, _ := strings.Cut(line, edge+"╭")
+					return strings.Fields(strings.TrimLeft(ansi.Strip(after), "─ "))[0]
+				}
+			}
+		}
+		return ""
+	}
+	if got := lit(); got != "CPU" {
+		t.Errorf("the CPU card should be lit to start with, not %q", got)
+	}
+	m.openSelected()
+	if m.modal == nil || m.modal.key != "result:load" {
+		t.Fatalf("CPU should open its history: %+v", m.modal)
+	}
+	if body := ansi.Strip(strings.Join(m.detailFor(m.modal.key, 41).body, "\n")); !strings.Contains(body, "Last 7 days") {
+		t.Errorf("no history:\n%s", body)
+	}
+	m.modal = nil
+	m.move(1)
+	if got := lit(); got != "Memory" {
+		t.Errorf("down from CPU should light Memory, not %q", got)
+	}
+	m.openSelected()
+	if m.modal == nil || m.modal.key != "result:memory" {
+		t.Fatalf("Memory should open its history: %+v", m.modal)
+	}
+	m.modal = nil
+	m.move(1)
+	if id := m.lists[tabProcs].id; id != "pid:4242" {
+		t.Errorf("down from Memory should reach the first process, not %s", id)
+	}
+	m.setProcSort(true)
+	if id := m.lists[tabProcs].id; id != "pid:5000" {
+		t.Errorf("sorting from a process should select the new first one, not %s", id)
+	}
+	// The charts are there on a phone too, and on a screen too narrow for
+	// them side by side, one over the other.
+	for _, width := range []int{40, 32} {
+		m.width = width
+		page := ansi.Strip(m.render())
+		for _, want := range []string{"─ CPU ", "─ Memory ", "─ Processes "} {
+			if !strings.Contains(page, want) {
+				t.Errorf("width %d lacks %q:\n%s", width, want, page)
+			}
+		}
+	}
+}
+
 func TestProcsSortAndProtect(t *testing.T) {
 	m := testModel(t)
-	if ids := m.procItems(); ids[0] != "pid:4242" || len(ids) != 4 {
+	if ids := m.procItems(); ids[2] != "pid:4242" || len(ids) != 6 {
 		t.Fatalf("by CPU: %v", ids)
 	}
 	m.setProcSort(true)
-	if ids := m.procItems(); ids[0] != "pid:5000" {
+	if ids := m.procItems(); ids[2] != "pid:5000" {
 		t.Fatalf("by memory: %v", ids)
 	}
 	d := m.detailFor("pid:4242", 40)
@@ -1094,7 +1161,7 @@ func TestThemes(t *testing.T) {
 		for g, gname := range map[ground]string{groundDark: "dark", groundLight: "light", groundUnknown: "unknown"} {
 			th := themeNamed(name, g)
 			roles := map[string]colorT{
-				"accent": th.accent, "nav": th.nav, "cpu": th.cpu, "mem": th.mem, "disk": th.disk, "rx": th.rx, "tx": th.tx,
+				"accent": th.accent, "nav": th.nav, "cpu": th.cpu, "mem": th.mem, "disk": th.disk, "rx": th.rx, "tx": th.tx, "wr": th.wr,
 				"ok": th.ok, "info": th.info, "warn": th.warn, "danger": th.danger, "grey": th.muted,
 			}
 			for a, ca := range roles {
@@ -1394,6 +1461,81 @@ func TestHistoryCharts(t *testing.T) {
 		m.openItem(tabOverview, "history:net")
 		t.Log("\n" + ansi.Strip(m.render()))
 	}
+	// What the disks read and wrote has a history too, and the Overview's
+	// Disks card draws it live under the bars.
+	m.openItem(tabOverview, "history:io")
+	if m.modal == nil || m.modal.key != "history:io" {
+		t.Fatalf("the disks' activity should open as itself: %+v", m.modal)
+	}
+	body = ansi.Strip(strings.Join(m.detailFor(m.modal.key, 41).body, "\n"))
+	for _, want := range []string{"Busy", "12% of the time", "Read · avg", "Written · avg", "Last 7 days"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q:\n%s", want, body)
+		}
+	}
+	// Samples recorded before disk activity was aren't a week of zeros.
+	old := m.hist.samples
+	m.hist.samples = []history.Sample{{At: m.now.Add(-time.Hour), CPU: 5}}
+	if body := ansi.Strip(strings.Join(m.detailFor("history:io", 41).body, "\n")); !strings.Contains(body, "Read: nothing recorded") {
+		t.Errorf("old samples:\n%s", body)
+	}
+	m.hist.samples = old
+	m.modal = nil
+	for _, width := range []int{40, 90, 130} {
+		m.width = width
+		page := ansi.Strip(m.render())
+		for _, want := range []string{"R ", "W ", "4.0M/s"} {
+			if !strings.Contains(page, want) {
+				t.Errorf("width %d: the Overview lacks %q:\n%s", width, want, page)
+			}
+		}
+	}
+	// On a wide screen the Disks card is in the row of charts, and Storage
+	// has reading and writing as a card each above everything else.
+	m.width, m.height = 150, 60
+	for _, line := range strings.Split(ansi.Strip(m.render()), "\n") {
+		if strings.Contains(line, "─ CPU ") && !strings.Contains(line, "─ Disks ") {
+			t.Errorf("the Disks card should be beside the other charts:\n%s", line)
+		}
+	}
+	// Narrower than that the charts go two by two rather than being
+	// squeezed, and at every width they come before the checklist.
+	for _, width := range []int{40, 72, 90, 110, 125, 139, 140, 200} {
+		m.width = width
+		page := strings.Split(ansi.Strip(m.render()), "\n")
+		if top := page[2]; !strings.Contains(top, "─ CPU ") && !strings.Contains(top, "─ Now ") {
+			t.Errorf("width %d: the charts should come first:\n%s", width, top)
+		}
+		for _, line := range page {
+			if width >= mediumFrom && width < chartsRowFrom && strings.Contains(line, "─ CPU ") && strings.Contains(line, "─ Network ") {
+				t.Errorf("width %d: four charts in a row is too many:\n%s", width, line)
+			}
+		}
+	}
+	m.width = 130
+	m.switchTab(tabStorage)
+	page := strings.Split(ansi.Strip(m.render()), "\n")
+	if top := page[2]; !strings.Contains(top, "─ Read ") || !strings.Contains(top, "─ Write ") {
+		t.Errorf("Storage should open with what's read and written:\n%s", strings.Join(page, "\n"))
+	}
+	m.switchTab(tabNetwork)
+	page = strings.Split(ansi.Strip(m.render()), "\n")
+	if top := page[2]; !strings.Contains(top, "─ Download ") || !strings.Contains(top, "─ Upload ") {
+		t.Errorf("Network should open with what's coming in and going out:\n%s", strings.Join(page, "\n"))
+	}
+	m.switchTab(tabStorage)
+	// A phone has the same cards, and so does every tab with a pair.
+	m.width = 40
+	for tab, want := range map[tabID][]string{tabStorage: {"─ Read ", "─ Write "}, tabNetwork: {"─ Download ", "─ Upload "}, tabProcs: {"─ CPU ", "─ Memory "}} {
+		m.switchTab(tab)
+		top := strings.Split(ansi.Strip(m.render()), "\n")[2]
+		for _, w := range want {
+			if !strings.Contains(top, w) {
+				t.Errorf("a phone's page should open with %q:\n%s", w, top)
+			}
+		}
+	}
+	m.switchTab(tabOverview)
 	m.hist = histState{at: time.Now()}
 	if body := ansi.Strip(strings.Join(m.detailFor("result:memory", 41).body, " ")); !strings.Contains(body, "No history yet") {
 		t.Errorf("empty history:\n%s", body)
@@ -1646,7 +1788,7 @@ func TestNewTabsOpenTheirItems(t *testing.T) {
 	newTabs(m)
 	m.width, m.height = 130, 40
 	for tab, want := range map[tabID][]string{
-		tabStorage: {"vol:/", "du:/var", "clean", "clean:apt", "clean:unneeded", "prune:unused", "prune"},
+		tabStorage: {"history:io", "vol:/", "du:/var", "clean", "clean:apt", "clean:unneeded", "prune:unused", "prune"},
 		tabNetwork: {"history:net", "speedtest"},
 		tabAgents:  {"agent:claude", "agent:codex"},
 	} {
@@ -1689,7 +1831,11 @@ func TestSelectionDoesNotCoverCharts(t *testing.T) {
 	m.width, m.height = 130, 40
 	band, _, _ := strings.Cut(m.th.selected.Render("x"), "x")
 	edge, _, _ := strings.Cut(m.th.accentText.Render("x"), "x")
-	for tab, id := range map[tabID]string{tabStorage: "vol:/", tabNetwork: "history:net", tabAgents: "agent:codex"} {
+	for _, c := range []struct {
+		tab tabID
+		id  string
+	}{{tabStorage, "vol:/"}, {tabStorage, "history:io"}, {tabNetwork, "history:net"}, {tabAgents, "agent:codex"}} {
+		tab, id := c.tab, c.id
 		m.switchTab(tab)
 		m.lists[tab].pick(id, m.items(tab))
 		frame := m.render()

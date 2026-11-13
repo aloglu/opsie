@@ -28,6 +28,9 @@ func (m *Model) storageSections(inner int) []section {
 		return []section{{title: "Storage", intro: []string{t.dim.Render("Measuring…")}}}
 	}
 	var out []section
+	if len(m.snap.IO.Devices) > 0 {
+		out = append(out, m.activitySection(inner))
+	}
 	for _, d := range m.snap.Disks {
 		out = append(out, m.diskSection(d, inner))
 	}
@@ -71,6 +74,67 @@ func (m *Model) diskSection(d metrics.Disk, inner int) section {
 	// What's using it, and its history, are in its popup.
 	s.entries = []entry{{id: "vol:" + d.Mount, lines: lines, block: true}}
 	return s
+}
+
+// activitySection is what the disks are reading and writing, as an item.
+// storagePage draws it, as a pair of cards.
+func (m *Model) activitySection(int) section {
+	return section{title: "Activity", entries: []entry{{id: "history:io"}}}
+}
+
+// storagePage puts what the disks are reading and writing above the rest,
+// a card each.
+func (m *Model) storagePage(w int) block {
+	if !m.haveSnap || len(m.snap.IO.Devices) == 0 {
+		return m.sectionsPage(tabStorage, w, 0)
+	}
+	t := m.th
+	io := m.snap.IO
+	top := m.pair(w,
+		m.rateCard(tabStorage, "history:io", io.Ready, "Read", t.disk, m.rd, io.ReadRate, io.ReadTotal, strings.Join(io.Devices, " ")),
+		m.rateCard(tabStorage, "history:io", io.Ready, "Write", t.wr, m.wr, io.WriteRate, io.WriteTotal, fmt.Sprintf("%.0f%% busy", io.Busy)))
+	// The cards stand in for the Activity section, which is first.
+	return vstack(w, top, m.sectionsPage(tabStorage, w, 1))
+}
+
+// rateCard is one side of a pair of rates as a card, read or written, in
+// or out: its chart on its own scale, with the peak that scale comes from
+// above it. It opens id on tab, and is lit when that's the selection.
+func (m *Model) rateCard(tab tabID, id string, ready bool, title string, c colorT, past series, rate float64, total uint64, note string) func(inner int) cardSpec {
+	return func(inner int) cardSpec {
+		t := m.th
+		s := cardSpec{title: title, selected: -1, focus: noFocus(), open: id, openTab: tab}
+		if !ready {
+			s.body = []string{t.dim.Render("Measuring…")}
+			return s
+		}
+		s.badge = lipgloss.NewStyle().Foreground(c).Bold(true).Render(human.Rate(rate))
+		peak := 0.0
+		for _, v := range past[max(len(past)-inner, 0):] {
+			peak = max(peak, v)
+		}
+		// The peak stays where there isn't room for everything: it's what
+		// says how tall the chart is.
+		about := "peak " + human.Rate(peak)
+		line, ok := spread(t.dim.Render("since boot "+human.Bytes(total)+" · "+about), t.dim.Render(note), inner)
+		if !ok {
+			line, ok = spread(t.dim.Render(about), t.dim.Render(note), inner)
+		}
+		if !ok {
+			line = t.dim.Render(fit(about, inner))
+		}
+		if inner < 20 {
+			// Too narrow for every title to have its rate beside it, so
+			// it goes on the line over the chart instead, on both of a pair.
+			line, s.badge = fit(s.badge, inner), ""
+		}
+		s.body = append([]string{line}, t.chart(past, inner, 4+m.grow+m.pad, max(peak, 1024), func(float64) colorT { return c })...)
+		if ids, l := m.items(tab), &m.lists[tab]; l.sel < len(ids) && ids[l.sel] == id {
+			s.focused = true
+			s.focus = [2]int{0, len(s.body) + 1}
+		}
+		return s
+	}
 }
 
 // foldersSection is the biggest folders of the main disk, each with a

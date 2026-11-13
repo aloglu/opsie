@@ -1,6 +1,6 @@
 # Network
 
-The **Network** tab shows traffic in and out with taller charts than the Overview's (open it for the last day and week), the interfaces with their addresses and totals, a **speed test**, and the [Cloudflare Tunnel](#cloudflare-tunnel) with its hostnames, if one runs here. The test measures the server's connection against the nearest Cloudflare data center: the round trip, then download and upload on four connections each, for eight seconds or until it has moved 500 MB down and 250 MB up, whichever comes first. It only runs when you ask, shows its progress as it goes, and remembers the last twenty results.
+The **Network** tab opens with **Download** and **Upload**, charts of the traffic in and out right now, each on its own scale with its peak and total since boot; open either for the last day and week. Under them are the interfaces with their addresses and totals, a **speed test**, and the [Cloudflare Tunnel](#cloudflare-tunnel) with its hostnames, if one runs here. The test measures the server's connection against the nearest Cloudflare data center: the round trip, then download and upload on four connections each, for eight seconds or until it has moved 500 MB down and 250 MB up, whichever comes first. It only runs when you ask, shows its progress as it goes, and remembers the last twenty results.
 
 ## Cloudflare Tunnel
 

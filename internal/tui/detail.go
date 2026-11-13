@@ -155,6 +155,8 @@ func (m *Model) detailFor(key string, inner int) detail {
 		return m.pruneDetail(b)
 	case key == "history:net":
 		return m.netHistoryDetail(b)
+	case key == "history:io":
+		return m.ioHistoryDetail(b)
 	case strings.HasPrefix(key, "du:"):
 		return m.duDetail(strings.TrimPrefix(key, "du:"), b)
 	case key == "clean" || strings.HasPrefix(key, "clean:"):

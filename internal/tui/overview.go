@@ -10,6 +10,7 @@ import (
 
 	"github.com/aloglu/opsie/internal/health"
 	"github.com/aloglu/opsie/internal/human"
+	"github.com/aloglu/opsie/internal/metrics"
 )
 
 // overviewPage builds the Overview tab, letting the charts grow into any
@@ -18,10 +19,10 @@ func (m *Model) overviewPage(w, h int) block {
 	m.grow = 0
 	content := m.overview(w)
 	if spare := h - content.height(); spare > 0 && w >= mediumFrom {
-		// Medium layouts have two rows of charts to share the room.
-		rows := 1
-		if w < wideFrom {
-			rows = 2
+		// Charts in two rows have the room to share.
+		rows := 2
+		if w >= chartsRowFrom {
+			rows = 1
 		}
 		m.grow = min(spare/rows, 12)
 		content = m.overview(w)
@@ -29,39 +30,45 @@ func (m *Model) overviewPage(w, h int) block {
 	return content
 }
 
-// overview lays the cards out for the width: three columns on wide
-// screens, two on medium ones, and a single column on phones.
+// chartsRowFrom is the narrowest a screen can be and still give the four
+// charts a row to themselves without squeezing them.
+const chartsRowFrom = 140
+
+// overview lays the cards out for the width. The charts are always what
+// comes first: in a row where four fit comfortably, two by two where
+// they don't, and as one card of lines on a phone. The checklist and the
+// system are under them, side by side where there's room.
 func (m *Model) overview(w int) block {
-	switch {
-	case w >= wideFrom:
-		cols := split(w, 3, 1)
-		metrics := m.row(1, cols, m.cpuCard, m.memCard, m.netCard)
-		lw := (w - 1) * 3 / 5
-		rw := w - 1 - lw
-		right := vstack(rw, m.cardBlock(m.systemCard(rw-4), rw, 0), m.cardBlock(m.diskCard(rw-4), rw, 0))
-		left := m.cardBlock(m.healthCard(lw-4), lw, right.height()-2)
-		return vstack(w, metrics, hstack(1, left, right))
-	case w >= mediumFrom:
-		cols := split(w, 2, 1)
+	if w < mediumFrom {
+		// A phone gets the readings as one card, a line each, so they and
+		// the top of the checklist are on screen together; their charts
+		// are a tap away.
 		return vstack(w,
+			m.cardBlock(m.vitalsCard(w-4), w, 0),
 			m.cardBlock(m.healthCard(w-4), w, 0),
-			m.row(1, cols, m.cpuCard, m.memCard),
-			m.row(1, cols, m.netCard, m.diskCard),
 			m.cardBlock(m.systemCard(w-4), w, 0),
 		)
 	}
-	// A phone gets the readings as one card of bars, a line each, so they
-	// and the top of the checklist are on screen together; their charts
-	// are a tap away.
-	return vstack(w,
-		m.cardBlock(m.vitalsCard(w-4), w, 0),
-		m.cardBlock(m.healthCard(w-4), w, 0),
-		m.cardBlock(m.systemCard(w-4), w, 0),
-	)
+	var charts block
+	if w >= chartsRowFrom {
+		charts = m.row(1, split(w, 4, 1), m.cpuCard, m.memCard, m.netCard, m.diskCard)
+	} else {
+		cols := split(w, 2, 1)
+		charts = vstack(w, m.row(1, cols, m.cpuCard, m.memCard), m.row(1, cols, m.netCard, m.diskCard))
+	}
+	if w < wideFrom {
+		return vstack(w, charts, m.cardBlock(m.healthCard(w-4), w, 0), m.cardBlock(m.systemCard(w-4), w, 0))
+	}
+	lw := (w - 1) * 3 / 5
+	rw := w - 1 - lw
+	right := m.cardBlock(m.systemCard(rw-4), rw, 0)
+	left := m.cardBlock(m.healthCard(lw-4), lw, right.height()-2)
+	return vstack(w, charts, hstack(1, left, right))
 }
 
-// vitalsCard is every reading in a line: CPU, memory, swap, each disk and
-// the network. A tap on one opens its history.
+// vitalsCard is every reading on a line of its own, all drawn the same
+// way: its name, the last while as a chart one row tall, and where it is
+// now. A tap on one opens its history or its tab.
 func (m *Model) vitalsCard(inner int) cardSpec {
 	t := m.th
 	s := cardSpec{title: "Now", selected: -1, focus: noFocus()}
@@ -71,53 +78,101 @@ func (m *Model) vitalsCard(inner int) cardSpec {
 	}
 	th := m.env.Config.Thresholds
 	snap := m.snap
-	const labelW, pctW = 5, 4
-	row := func(label string, pct float64, c colorT, extra, open string, tab tabID) {
-		line := t.subtle.Render(fit(label, labelW)) + " "
-		num := fmt.Sprintf("%*.0f%%", pctW-1, pct)
-		extraW := 0
-		if inner >= 38 {
-			extraW = 10
-		}
-		if gw := inner - labelW - 1 - 1 - pctW - extraW; gw >= 4 {
-			line += t.gauge(pct, gw, c) + " "
-		}
-		line += lipgloss.NewStyle().Foreground(c).Bold(true).Render(num)
-		if extraW > 0 {
-			line += t.dim.Render(fmt.Sprintf("%*s", extraW, extra))
-		}
-		s.hits = append(s.hits, hit{x: -2, y: len(s.body), w: inner + 4, h: 1, click: func(m *Model) tea.Cmd {
-			if tab != tabOverview {
-				return m.switchTab(tab)
+	const labelW, valueW = 5, 7
+	cw := inner - labelW - 1 - 1 - valueW
+	// line is one reading. mark, the last character of the label, says
+	// which way a rate goes; top is what a full-height bar stands for, or
+	// 0 for the most there's been.
+	line := func(label, mark string, past series, top float64, color func(float64) colorT, now float64, value string, click func(m *Model) tea.Cmd) {
+		c := color(now)
+		text := t.subtle.Render(fit(label, labelW-1)) + lipgloss.NewStyle().Foreground(c).Bold(true).Render(fit(mark, 1))
+		if cw >= 4 {
+			if top == 0 {
+				top = 1024
+				for _, v := range past[max(len(past)-cw, 0):] {
+					top = max(top, v)
+				}
 			}
-			return m.openItem(tabOverview, open)
-		}})
-		s.body = append(s.body, line)
+			text += " " + t.chart(past, cw, 1, top, color)[0]
+		}
+		text += " " + lipgloss.NewStyle().Foreground(c).Bold(true).Render(fmt.Sprintf("%*s", valueW, value))
+		s.hits = append(s.hits, hit{x: -2, y: len(s.body), w: inner + 4, h: 1, click: click})
+		s.body = append(s.body, text)
 	}
-	row("CPU", snap.CPU, t.level(t.cpu, snap.CPU, 80, 95), fmt.Sprintf("load %.2f", snap.Load[0]), "load", tabOverview)
-	row("RAM", snap.Mem.Percent, t.level(t.mem, snap.Mem.Percent, th.MemoryWarn, th.MemoryCrit), human.Bytes(snap.Mem.Used)+"/"+human.Bytes(snap.Mem.Total), "memory", tabOverview)
+	open := func(id string) func(m *Model) tea.Cmd {
+		return func(m *Model) tea.Cmd { return m.openItem(tabOverview, id) }
+	}
+	goTo := func(tab tabID) func(m *Model) tea.Cmd {
+		return func(m *Model) tea.Cmd { return m.switchTab(tab) }
+	}
+	pct := func(v float64) string { return fmt.Sprintf("%.0f%%", v) }
+	level := func(base colorT, warn, crit float64) func(float64) colorT {
+		return func(v float64) colorT { return t.level(base, v, warn, crit) }
+	}
+	plain := func(c colorT) func(float64) colorT { return func(float64) colorT { return c } }
+
+	line("CPU", "", m.cpu, 100, level(t.cpu, 80, 95), snap.CPU, pct(snap.CPU), open("load"))
+	line("RAM", "", m.mem, 100, level(t.mem, th.MemoryWarn, th.MemoryCrit), snap.Mem.Percent, pct(snap.Mem.Percent), open("memory"))
 	if sw := snap.Swap; sw.Total > 0 {
-		row("Swap", sw.Percent, t.level(t.mem, sw.Percent, th.SwapWarn, 95), human.Bytes(sw.Used)+"/"+human.Bytes(sw.Total), "swap", tabOverview)
+		line("Swap", "", m.swap, 100, level(t.mem, th.SwapWarn, 95), sw.Percent, pct(sw.Percent), open("swap"))
 	}
+	// One line for the disks: the main one, and any other only once it's
+	// filling up. The rest are on Storage. How full a disk is doesn't
+	// move in the time a chart covers, so its line is level.
 	for _, d := range snap.Disks {
-		row(d.Mount, d.Percent, t.level(t.disk, d.Percent, th.DiskWarn, th.DiskCrit), human.Bytes(d.Free)+" free", "", tabStorage)
+		label := d.Mount
+		switch {
+		case d.Mount == mainDisk(snap.Disks).Mount:
+			label = "Disk"
+		case d.Percent < th.DiskWarn:
+			continue
+		}
+		steady := make(series, max(cw, 1))
+		for i := range steady {
+			steady[i] = d.Percent
+		}
+		line(label, "", steady, 100, level(t.disk, th.DiskWarn, th.DiskCrit), d.Percent, pct(d.Percent), goTo(tabStorage))
 	}
 	if n := snap.Net; n.Ready {
-		paint := func(c colorT, s string) string { return lipgloss.NewStyle().Foreground(c).Bold(true).Render(s) }
-		line := t.subtle.Render(fit("Net", labelW)) + " " + paint(t.rx, "↓") + " " + human.Rate(n.RxRate) + "  " + paint(t.tx, "↑") + " " + human.Rate(n.TxRate)
-		s.hits = append(s.hits, hit{x: -2, y: len(s.body), w: inner + 4, h: 1, click: func(m *Model) tea.Cmd { return m.switchTab(tabNetwork) }})
-		s.body = append(s.body, line)
+		line("Net", "↓", m.rx, 0, plain(t.rx), n.RxRate, human.Rate(n.RxRate), goTo(tabNetwork))
+		line("", "↑", m.tx, 0, plain(t.tx), n.TxRate, human.Rate(n.TxRate), goTo(tabNetwork))
+	}
+	if io := snap.IO; io.Ready {
+		line("I/O", "R", m.rd, 0, plain(t.disk), io.ReadRate, human.Rate(io.ReadRate), open("history:io"))
+		line("", "W", m.wr, 0, plain(t.wr), io.WriteRate, human.Rate(io.WriteRate), open("history:io"))
 	}
 	return s
 }
 
-// row renders cards side by side at the same height.
+// mainDisk is the disk the system is on, or the first there is.
+func mainDisk(disks []metrics.Disk) metrics.Disk {
+	for _, d := range disks {
+		if d.Mount == "/" {
+			return d
+		}
+	}
+	if len(disks) > 0 {
+		return disks[0]
+	}
+	return metrics.Disk{}
+}
+
+// row renders cards side by side at the same height. A card shorter than
+// the tallest is built again with the difference in pad, for its charts
+// to take up.
 func (m *Model) row(gap int, widths []int, cards ...func(inner int) cardSpec) block {
 	specs := make([]cardSpec, len(cards))
 	tallest := 0
 	for i, card := range cards {
 		specs[i] = card(widths[i] - 4)
 		tallest = max(tallest, len(specs[i].body))
+	}
+	for i, card := range cards {
+		if short := tallest - len(specs[i].body); short > 0 {
+			m.pad = short
+			specs[i] = card(widths[i] - 4)
+			m.pad = 0
+		}
 	}
 	blocks := make([]block, len(specs))
 	for i, spec := range specs {
@@ -230,14 +285,20 @@ func (m *Model) cpuCard(inner int) cardSpec {
 		return s
 	}
 	s.badge = lipgloss.NewStyle().Foreground(t.level(t.cpu, m.snap.CPU, 80, 95)).Bold(true).Render(fmt.Sprintf("%.0f%%", m.snap.CPU))
-	s.body = t.chart(m.cpu, inner, 4+m.grow, 100, func(v float64) colorT { return t.level(t.cpu, v, 80, 95) })
 	l := m.snap.Load
 	loadText := t.subtle.Render("load ") + fmt.Sprintf("%.2f %.2f %.2f", l[0], l[1], l[2])
 	line, ok := spread(loadText, t.dim.Render(human.Plural(m.snap.Cores, "core", "cores")), inner)
+	if !ok && lipgloss.Width(loadText) > inner {
+		// The last minute is the one that matters most.
+		loadText = t.subtle.Render("load ") + fmt.Sprintf("%.2f", l[0])
+	}
 	if !ok {
 		line = fit(loadText, inner)
 	}
+	// What's written goes above a chart, in every card, so nothing sits
+	// between the chart and the card's edge.
 	s.body = append(s.body, line)
+	s.body = append(s.body, t.chart(m.cpu, inner, 4+m.grow+m.pad, 100, func(v float64) colorT { return t.level(t.cpu, v, 80, 95) })...)
 	return s
 }
 
@@ -265,7 +326,7 @@ func (m *Model) memCard(inner int) cardSpec {
 	} else {
 		s.body = append(s.body, t.subtle.Render("Swap ")+t.dim.Render("none"))
 	}
-	s.body = append(s.body, t.chart(m.mem, inner, 3+m.grow, 100, func(v float64) colorT { return t.level(t.mem, v, th.MemoryWarn, th.MemoryCrit) })...)
+	s.body = append(s.body, t.chart(m.mem, inner, 3+m.grow+m.pad, 100, func(v float64) colorT { return t.level(t.mem, v, th.MemoryWarn, th.MemoryCrit) })...)
 	return s
 }
 
@@ -280,42 +341,34 @@ func (m *Model) netCard(inner int) cardSpec {
 	if len(n.Interfaces) > 0 {
 		s.badge = t.dim.Render(strings.Join(n.Interfaces, " "))
 	}
-	const valueW = 9
-	cw := inner - 2 - 1 - valueW
-	window := func(v series) series {
-		if len(v) > cw {
-			return v[len(v)-cw:]
-		}
-		return v
-	}
-	top := 1024.0
-	for _, v := range append(append(series{}, window(m.rx)...), window(m.tx)...) {
-		top = max(top, v)
-	}
-	draw := func(arrow string, style lipgloss.Style, values series, rate float64) {
-		rows := t.chart(values, cw, 2+m.grow/2, top, func(float64) colorT { return style.GetForeground() })
-		for i, row := range rows {
-			label, value := "  ", strings.Repeat(" ", valueW)
-			if i == 0 {
-				label = style.Bold(true).Render(arrow) + " "
-				value = fmt.Sprintf("%*s", valueW, human.Rate(rate))
-			}
-			s.body = append(s.body, label+row+" "+value)
-		}
-	}
-	if cw >= 4 {
-		draw("↓", lipgloss.NewStyle().Foreground(t.rx), m.rx, n.RxRate)
-		draw("↑", lipgloss.NewStyle().Foreground(t.tx), m.tx, n.TxRate)
-	} else {
-		s.body = append(s.body, "↓ "+human.Rate(n.RxRate), "↑ "+human.Rate(n.TxRate))
-	}
-	s.body = append(s.body, t.dim.Render(fmt.Sprintf("since boot ↓ %s  ↑ %s", human.Bytes(n.RxTotal), human.Bytes(n.TxTotal))))
+	s.body = []string{m.sinceBoot(fmt.Sprintf("↓ %s  ↑ %s", human.Bytes(n.RxTotal), human.Bytes(n.TxTotal)), inner)}
+	s.body = append(s.body, m.flowCharts(inner, 4+m.grow+m.pad,
+		flow{mark: "↓", c: t.rx, past: m.rx, rate: n.RxRate},
+		flow{mark: "↑", c: t.tx, past: m.tx, rate: n.TxRate})...)
 	return s
 }
 
+// sinceBoot is the line of totals under a pair of charts. It says what
+// they're totals of where there's room to.
+func (m *Model) sinceBoot(totals string, inner int) string {
+	if lipgloss.Width("since boot "+totals) <= inner {
+		totals = "since boot " + totals
+	}
+	return m.th.dim.Render(fit(totals, inner))
+}
+
+// diskCard is how full each disk is, over charts of what they're reading
+// and writing.
 func (m *Model) diskCard(inner int) cardSpec {
 	t := m.th
 	s := cardSpec{title: "Disks", selected: -1, focus: noFocus()}
+	if m.haveSnap && len(m.snap.IO.Devices) > 0 {
+		// The card opens what the disks are doing; each bar, its own disk.
+		s.open = "history:io"
+		if io := m.snap.IO; io.Ready {
+			s.badge = t.dim.Render(fmt.Sprintf("%.0f%% busy", io.Busy))
+		}
+	}
 	if !m.haveSnap {
 		s.body = []string{t.dim.Render("Sampling…")}
 		return s
@@ -347,7 +400,74 @@ func (m *Model) diskCard(inner int) cardSpec {
 		s.hits = append(s.hits, hit{x: -2, y: len(s.body), w: inner + 4, h: 1, click: func(m *Model) tea.Cmd { return m.openItem(tabOverview, id) }})
 		s.body = append(s.body, line)
 	}
+	s.body = append(s.body, m.ioLines(inner)...)
 	return s
+}
+
+// ioLines is what's been read and written, over charts of it. It's empty where
+// the system doesn't say.
+func (m *Model) ioLines(inner int) []string {
+	t := m.th
+	io := m.snap.IO
+	switch {
+	case !m.haveSnap || len(io.Devices) == 0:
+		return nil
+	case !io.Ready:
+		return []string{t.dim.Render("Measuring…")}
+	}
+	body := m.flowCharts(inner, 4+m.grow+m.pad,
+		flow{mark: "R", c: t.disk, past: m.rd, rate: io.ReadRate},
+		flow{mark: "W", c: t.wr, past: m.wr, rate: io.WriteRate})
+	return append([]string{m.sinceBoot(fmt.Sprintf("R %s  W %s", human.Bytes(io.ReadTotal), human.Bytes(io.WriteTotal)), inner)}, body...)
+}
+
+// flow is one of a set of rates drawn together: read and written, in and
+// out.
+type flow struct {
+	mark string
+	c    colorT
+	past series
+	rate float64
+}
+
+// flowCharts draws rates as charts one above the other on one scale,
+// each with its mark in front and its latest value after. They share
+// rows evenly, so they read against each other; a row that's left over
+// goes between them.
+func (m *Model) flowCharts(inner, rows int, flows ...flow) []string {
+	const valueW = 9
+	cw := inner - 2 - 1 - valueW
+	var body []string
+	if cw < 4 {
+		for _, f := range flows {
+			body = append(body, f.mark+" "+human.Rate(f.rate))
+		}
+		return body
+	}
+	spare := rows % len(flows)
+	rows /= len(flows)
+	top := 1024.0
+	for _, f := range flows {
+		for _, v := range f.past[max(len(f.past)-cw, 0):] {
+			top = max(top, v)
+		}
+	}
+	for n, f := range flows {
+		if n > 0 {
+			for ; spare > 0; spare-- {
+				body = append(body, "")
+			}
+		}
+		for i, row := range m.th.chart(f.past, cw, rows, top, func(float64) colorT { return f.c }) {
+			label, value := "  ", strings.Repeat(" ", valueW)
+			if i == 0 {
+				label = lipgloss.NewStyle().Foreground(f.c).Bold(true).Render(f.mark) + " "
+				value = fmt.Sprintf("%*s", valueW, human.Rate(f.rate))
+			}
+			body = append(body, label+row+" "+value)
+		}
+	}
+	return body
 }
 
 func (m *Model) systemCard(inner int) cardSpec {

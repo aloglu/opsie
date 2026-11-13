@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,7 @@ type Snapshot struct {
 	Swap Memory
 
 	Disks    []Disk
+	IO       DiskIO
 	Net      Net
 	Host     Host
 	Sessions []Session
@@ -54,6 +56,19 @@ type Disk struct {
 	Mount, Device, FSType string
 	Total, Used, Free     uint64
 	Percent, InodePercent float64
+}
+
+// DiskIO is what's being read from and written to the physical disks,
+// summed over them.
+type DiskIO struct {
+	// ReadRate and WriteRate are bytes per second; Ready is false until
+	// there have been two samples to compare.
+	ReadRate, WriteRate   float64
+	ReadTotal, WriteTotal uint64
+	// Busy is the share of the time the busiest disk had work to do, 0–100.
+	Busy    float64
+	Ready   bool
+	Devices []string
 }
 
 // Net is traffic summed over the real network interfaces.
@@ -91,6 +106,9 @@ type Collector struct {
 
 	prevRx, prevTx uint64
 	prevAt         time.Time
+
+	prevIO   map[string]diskCount
+	prevIOAt time.Time
 
 	sessionsCache []Session
 	sessionsAt    time.Time
@@ -135,6 +153,7 @@ func (c *Collector) Collect(ctx context.Context) Snapshot {
 		s.Swap = Memory{Total: sw.Total, Used: sw.Used, Available: sw.Free, Percent: percent(sw.Used, sw.Total)}
 	}
 	s.Disks = disks(ctx)
+	s.IO = c.diskIO(now)
 	s.Net = c.network(ctx, now)
 	s.Host = c.hostInfo(ctx, now)
 	s.Sessions = c.sessions(ctx, now)
@@ -193,6 +212,80 @@ func disks(ctx context.Context) []Disk {
 		return out[i].Mount < out[j].Mount
 	})
 	return out
+}
+
+// diskCount is one disk's line of /proc/diskstats: bytes since boot, and
+// the milliseconds it has spent with work to do.
+type diskCount struct {
+	read, written, busyMs uint64
+}
+
+// stackedDisk reports block devices that aren't hardware: memory-backed
+// ones, and ones built on other disks, whose work is counted there.
+func stackedDisk(name string) bool {
+	for _, prefix := range []string{"loop", "ram", "zram", "dm-", "md", "sr", "fd", "nbd"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// parseDiskstats reads /proc/diskstats, keeping the devices whole says
+// are disks rather than partitions of one.
+func parseDiskstats(data string, whole func(name string) bool) map[string]diskCount {
+	out := map[string]diskCount{}
+	for _, line := range strings.Split(data, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 13 || stackedDisk(f[2]) || !whole(f[2]) {
+			continue
+		}
+		num := func(i int) uint64 {
+			n, _ := strconv.ParseUint(f[i], 10, 64)
+			return n
+		}
+		// Sectors here are 512 bytes whatever the disk's own are.
+		out[f[2]] = diskCount{read: num(5) * 512, written: num(9) * 512, busyMs: num(12)}
+	}
+	return out
+}
+
+func wholeDisk(name string) bool {
+	_, err := os.Stat("/sys/block/" + name)
+	return err == nil
+}
+
+func (c *Collector) diskIO(now time.Time) DiskIO {
+	data, err := os.ReadFile("/proc/diskstats")
+	if err != nil {
+		return DiskIO{}
+	}
+	counts := parseDiskstats(string(data), wholeDisk)
+	io := rates(c.prevIO, counts, now.Sub(c.prevIOAt))
+	c.prevIO, c.prevIOAt = counts, now
+	return io
+}
+
+// rates compares two readings of the disks taken dt apart. A disk that
+// wasn't in the first one, or whose counters went backwards, adds to the
+// totals but not to the rates.
+func rates(prev, cur map[string]diskCount, dt time.Duration) DiskIO {
+	var io DiskIO
+	for name, n := range cur {
+		io.Devices = append(io.Devices, name)
+		io.ReadTotal += n.read
+		io.WriteTotal += n.written
+		p, ok := prev[name]
+		if !ok || dt <= 0 || n.read < p.read || n.written < p.written || n.busyMs < p.busyMs {
+			continue
+		}
+		io.Ready = true
+		io.ReadRate += float64(n.read-p.read) / dt.Seconds()
+		io.WriteRate += float64(n.written-p.written) / dt.Seconds()
+		io.Busy = max(io.Busy, min(float64(n.busyMs-p.busyMs)/float64(dt.Milliseconds())*100, 100))
+	}
+	sort.Strings(io.Devices)
+	return io
 }
 
 // virtualInterface reports interfaces whose traffic is already counted on

@@ -22,9 +22,11 @@ type theme struct {
 	name string
 	look look
 
-	text, muted, faint, border    color.Color
-	accent, accent2, nav          color.Color
-	cpu, mem, disk, rx, tx        color.Color
+	text, muted, faint, border color.Color
+	accent, accent2, nav       color.Color
+	cpu, mem, disk, rx, tx     color.Color
+	// wr is what's written to the disks; what's read is in disk's color.
+	wr                            color.Color
 	ok, info, warn, danger, track color.Color
 
 	bold, subtle, dim, accentText lipgloss.Style
@@ -102,6 +104,8 @@ type palette struct {
 	nav float64
 	// The charts and bars, one hue per reading.
 	cpu, mem, disk, rx, tx float64
+	// wr is what's written to the disks; what's read is in disk's hue.
+	wr                     float64
 	ok, info, warn, danger float64
 	// tint is the hue of the greys, and vivid how strong the colors are
 	// next to the other themes'.
@@ -118,6 +122,7 @@ func (p palette) roles() map[string]float64 {
 	return map[string]float64{
 		"accent": p.accent, "nav": p.nav,
 		"cpu": p.cpu, "mem": p.mem, "disk": p.disk, "rx": p.rx, "tx": p.tx,
+		"wr": p.wr,
 		"ok": p.ok, "info": p.info, "warn": p.warn, "danger": p.danger,
 	}
 }
@@ -128,24 +133,24 @@ func (p palette) roles() map[string]float64 {
 // warning ones they turn into. Its look gives it its shape.
 var palettes = map[string]palette{
 	// teal to violet, cool slate greys, rounded
-	"opsie": {accent: 190, accent2: 295, nav: 295, cpu: 330, mem: 268, disk: 120, rx: 50, tx: 0,
+	"opsie": {accent: 190, accent2: 295, nav: 295, cpu: 330, mem: 268, disk: 120, rx: 50, tx: 0, wr: 312,
 		ok: 150, info: 240, warn: 82, danger: 25, tint: 240, vivid: 1, look: lookRound},
 	// Steph Ango's Flexoki (stephango.com/flexoki): its eight inks on warm
 	// paper greys, a little quieter than the rest, square
-	"flexoki": {accent: 50, accent2: 350, nav: 350, cpu: 190, mem: 295, disk: 222, rx: 322, tx: 152,
+	"flexoki": {accent: 50, accent2: 350, nav: 350, cpu: 190, mem: 295, disk: 222, rx: 322, tx: 152, wr: 274,
 		ok: 122, info: 255, warn: 88, danger: 25, tint: 80, vivid: 0.9, look: lookSquare},
 	// green to olive, lichen greys, soft bars
-	"moss": {accent: 138, accent2: 105, nav: 325, cpu: 290, mem: 350, disk: 225, rx: 55, tx: 108,
+	"moss": {accent: 138, accent2: 105, nav: 325, cpu: 290, mem: 350, disk: 225, rx: 55, tx: 108, wr: 158,
 		ok: 185, info: 255, warn: 80, danger: 28, tint: 125, vivid: 0.95, look: lookSoft},
 	// blue to cyan, blue-grey, heavy lines
-	"ocean": {accent: 250, accent2: 205, nav: 205, cpu: 330, mem: 125, disk: 278, rx: 50, tx: 355,
+	"ocean": {accent: 250, accent2: 205, nav: 205, cpu: 330, mem: 125, disk: 278, rx: 50, tx: 355, wr: 144,
 		ok: 160, info: 300, warn: 82, danger: 22, tint: 250, vivid: 1.05, look: lookHeavy},
 	// pink to violet, mauve greys, dashed lines and dotted charts, the
 	// strongest colors
-	"dusk": {accent: 345, accent2: 290, nav: 290, cpu: 130, mem: 318, disk: 215, rx: 45, tx: 105,
+	"dusk": {accent: 345, accent2: 290, nav: 290, cpu: 130, mem: 318, disk: 215, rx: 45, tx: 105, wr: 2,
 		ok: 170, info: 250, warn: 76, danger: 20, tint: 320, vivid: 1.15, look: lookDashed},
 	// no color but the warnings: everything else is the terminal's own text
-	"mono": {accent: plain, accent2: plain, nav: plain, cpu: plain, mem: plain, disk: plain, rx: plain, tx: plain,
+	"mono": {accent: plain, accent2: plain, nav: plain, cpu: plain, mem: plain, disk: plain, rx: plain, tx: plain, wr: plain,
 		ok: 150, info: 245, warn: 80, danger: 25, tint: plain, vivid: 0.45, look: lookSquare},
 }
 
@@ -188,15 +193,16 @@ func themeNamed(name string, g ground) theme {
 		disk:    col(p.disk),
 		rx:      col(p.rx),
 		tx:      col(p.tx),
+		wr:      col(p.wr),
 		ok:      col(p.ok),
 		info:    col(p.info),
 		warn:    col(p.warn),
 		danger:  col(p.danger),
 	}
 	if p.accent == plain {
-		// Out is the one reading that can't be told from another by its
-		// place, so it's grey next to In's plain text.
-		t.accent2, t.tx = t.muted, t.muted
+		// Out and written are the readings that can't be told from their
+		// pair by place, so they're grey next to the other's plain text.
+		t.accent2, t.tx, t.wr = t.muted, t.muted, t.muted
 	}
 	fg := func(c color.Color) lipgloss.Style { return lipgloss.NewStyle().Foreground(c) }
 	t.bold = lipgloss.NewStyle().Bold(true)

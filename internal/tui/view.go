@@ -86,8 +86,12 @@ func (m *Model) page(w, h, top int) []string {
 		switch m.tab {
 		case tabDocker:
 			return m.dockerPage(w)
-		case tabSecurity, tabUpdates, tabServices, tabSettings, tabStorage, tabNetwork, tabAgents:
-			return m.sectionsPage(m.tab, w)
+		case tabStorage:
+			return m.storagePage(w)
+		case tabNetwork:
+			return m.networkPage(w)
+		case tabSecurity, tabUpdates, tabServices, tabSettings, tabAgents:
+			return m.sectionsPage(m.tab, w, 0)
 		case tabProcs:
 			return m.procsPage(w)
 		}

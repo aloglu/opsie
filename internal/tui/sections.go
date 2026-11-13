@@ -61,7 +61,9 @@ func (m *Model) sectionItems(tab tabID) []string {
 	return ids
 }
 
-func (m *Model) sectionsPage(tab tabID, w int) block {
+// sectionsPage lays a tab's sections out as cards, leaving out the first
+// skip of them for a page that draws those itself.
+func (m *Model) sectionsPage(tab tabID, w, skip int) block {
 	ids := m.items(tab)
 	l := &m.lists[tab]
 	selected := ""
@@ -74,6 +76,9 @@ func (m *Model) sectionsPage(tab tabID, w int) block {
 	widths := split(w, n, 1)
 	var builds []func(inner int) cardSpec
 	for i := range m.sectionsFor(tab, widths[0]-4) {
+		if i < skip {
+			continue
+		}
 		builds = append(builds, func(inner int) cardSpec {
 			secs := m.sectionsFor(tab, inner)
 			if i >= len(secs) {
@@ -84,6 +89,21 @@ func (m *Model) sectionsPage(tab tabID, w int) block {
 	}
 	return masonry(m, w, builds)
 }
+
+// pair is a tab's two charts above everything else: side by side, or one
+// over the other on a screen too narrow for that. They're there at every
+// width.
+func (m *Model) pair(w int, a, b func(inner int) cardSpec) block {
+	m.grow = 0
+	if w < pairFrom {
+		return vstack(w, m.cardBlock(a(w-4), w, 0), m.cardBlock(b(w-4), w, 0))
+	}
+	return m.row(1, split(w, 2, 1), a, b)
+}
+
+// pairFrom is the narrowest a screen can be and still fit two charts
+// side by side.
+const pairFrom = 34
 
 func columnsFor(w int) int {
 	switch {

@@ -96,11 +96,13 @@ func (m *Model) shownProcs() (shown []metrics.Proc, hidden int) {
 	return shown, hidden
 }
 
+// procItems is what can be selected on the tab: the two charts, and then
+// the processes.
 func (m *Model) procItems() []string {
 	shown, _ := m.shownProcs()
-	ids := make([]string, len(shown))
-	for i, p := range shown {
-		ids[i] = "pid:" + strconv.Itoa(p.PID)
+	ids := []string{"load", "memory"}
+	for _, p := range shown {
+		ids = append(ids, "pid:"+strconv.Itoa(p.PID))
 	}
 	return ids
 }
@@ -169,12 +171,21 @@ func (m *Model) procsPage(w int) block {
 	if l.sel < len(ids) {
 		selected = ids[l.sel]
 	}
-	// What the processes add up to sits above them, where there's room.
-	if w >= mediumFrom {
-		m.grow = 0
-		return vstack(w, m.row(1, split(w, 2, 1), m.cpuCard, m.memCard), m.procsCard(w, selected))
+	// What the processes add up to sits above them. Here the charts are
+	// items like the rest: each opens its history, and is lit when it's
+	// the selection.
+	item := func(id string, card func(inner int) cardSpec) func(inner int) cardSpec {
+		return func(inner int) cardSpec {
+			s := card(inner)
+			s.open, s.openTab = id, tabProcs
+			if id == selected {
+				s.focused = true
+				s.focus = [2]int{0, len(s.body) + 1}
+			}
+			return s
+		}
 	}
-	return m.procsCard(w, selected)
+	return vstack(w, m.pair(w, item("load", m.cpuCard), item("memory", m.memCard)), m.procsCard(w, selected))
 }
 
 func (m *Model) procsCard(w int, selected string) block {
@@ -233,8 +244,14 @@ func (m *Model) procsCard(w int, selected string) block {
 func (m *Model) setProcSort(byMem bool) {
 	m.procs.byMem = byMem
 	l := &m.lists[tabProcs]
+	onProc := strings.HasPrefix(l.id, "pid:")
 	l.moved, l.scroll, l.follow = false, 0, true
 	m.syncLists()
+	// From a process, the selection goes to the one that's now first;
+	// from a chart, back to the start.
+	if shown, _ := m.shownProcs(); onProc && len(shown) > 0 {
+		l.pick("pid:"+strconv.Itoa(shown[0].PID), m.items(tabProcs))
+	}
 }
 
 // Column widths for the process table.

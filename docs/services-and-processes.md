@@ -10,6 +10,6 @@ opsie won't stop or disable the services that keep the server reachable (SSH, ne
 
 ## Processes
 
-The **Processes** tab has the CPU and memory charts at the top, where the screen is wide enough, and lists the busiest processes by CPU or memory (`s`, or tap the switch), with the service or container each one belongs to. Open one to see its command line and start time, ask it to stop or force it to, or lower its priority so it yields to everything else. If it belongs to a service or container, there's a link straight to that, since stopping the service is usually the better move.
+The **Processes** tab has the CPU and memory charts at the top; the selection starts on CPU, and opening either shows its last day and week. Under them it lists the busiest processes by CPU or memory (`s`, or tap the switch), with the service or container each one belongs to. Open one to see its command line and start time, ask it to stop or force it to, or lower its priority so it yields to everything else. If it belongs to a service or container, there's a link straight to that, since stopping the service is usually the better move.
 
 opsie checks the process is still the same one before signalling it (a reused PID won't be hit), and won't touch PID 1, kernel threads, its own session, or the main process of a service the server needs.

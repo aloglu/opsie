@@ -62,6 +62,8 @@ func historyKind(key string) string {
 		return "disk:" + strings.TrimPrefix(key, "vol:")
 	case key == "history:net":
 		return "net"
+	case key == "history:io":
+		return "io"
 	}
 	return ""
 }
@@ -98,6 +100,21 @@ func (m *Model) chartLines(kind string) []chartLine {
 		return []chartLine{
 			{label: "↓ In", pick: func(s history.Sample) (float64, bool) { return s.Rx, true }, color: func(float64) colorT { return in }, rate: true},
 			{label: "↑ Out", pick: func(s history.Sample) (float64, bool) { return s.Tx, true }, color: func(float64) colorT { return out }, rate: true},
+		}
+	case kind == "io":
+		// Samples from before this was recorded have nothing to show.
+		side := func(i int) func(history.Sample) (float64, bool) {
+			return func(s history.Sample) (float64, bool) {
+				if len(s.IO) != 2 {
+					return 0, false
+				}
+				return s.IO[i], true
+			}
+		}
+		rd, wr := t.disk, t.wr
+		return []chartLine{
+			{label: "Read", pick: side(0), color: func(float64) colorT { return rd }, rate: true},
+			{label: "Written", pick: side(1), color: func(float64) colorT { return wr }, rate: true},
 		}
 	}
 	return nil
@@ -180,6 +197,19 @@ func (m *Model) netHistoryDetail(b *detailBuilder) detail {
 	}
 	m.historyCharts("net", b)
 	return detail{title: "Network", headline: headline(t, health.Info, "traffic", strings.Join(n.Interfaces, " ")), body: b.body}
+}
+
+func (m *Model) ioHistoryDetail(b *detailBuilder) detail {
+	t := m.th
+	io := m.snap.IO
+	if io.Ready {
+		b.kv("Now", "read "+human.Rate(io.ReadRate)+" · written "+human.Rate(io.WriteRate))
+		b.kv("Busy", fmt.Sprintf("%.0f%% of the time", io.Busy))
+	}
+	b.kv("Since boot", "read "+human.Bytes(io.ReadTotal)+" · written "+human.Bytes(io.WriteTotal))
+	b.text("Busy is how much of the time the busiest disk had work waiting. Near 100% for long, the disk is what everything else is waiting for.", t.dim)
+	m.historyCharts("io", b)
+	return detail{title: "Disk activity", headline: headline(t, health.Info, "activity", strings.Join(io.Devices, " ")), body: b.body}
 }
 
 // zoom picks the range a percentage chart shows: all of 0–100 when the

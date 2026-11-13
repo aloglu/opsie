@@ -59,7 +59,10 @@ type Model struct {
 	snap      metrics.Snapshot
 	haveSnap  bool
 	cpu, mem  series
+	swap      series
 	rx, tx    series
+	// rd and wr are what the disks read and wrote.
+	rd, wr series
 
 	facts     facts.Facts
 	haveFacts bool
@@ -81,6 +84,9 @@ type Model struct {
 	// grow is how many rows the charts gain when the screen has height
 	// to spare.
 	grow int
+	// pad is how many more rows a card's charts take to match a taller
+	// card beside it.
+	pad int
 
 	dock  dockerState
 	svc   svcState
@@ -274,9 +280,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.snap, m.haveSnap = s, true
 		m.cpu.push(s.CPU)
 		m.mem.push(s.Mem.Percent)
+		m.swap.push(s.Swap.Percent)
 		if s.Net.Ready {
 			m.rx.push(s.Net.RxRate)
 			m.tx.push(s.Net.TxRate)
+		}
+		if s.IO.Ready {
+			m.rd.push(s.IO.ReadRate)
+			m.wr.push(s.IO.WriteRate)
 		}
 		m.evaluate()
 		return m, m.sampleLater()

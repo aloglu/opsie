@@ -41,13 +41,13 @@ func PrintThemes(env *app.Env) error {
 		}
 		paint := func(c colorT, s string) string { return lipgloss.NewStyle().Foreground(c).Render(s) }
 		charts := ""
-		for _, c := range []colorT{t.cpu, t.mem, t.disk, t.rx, t.tx} {
+		for _, c := range []colorT{t.cpu, t.mem, t.disk, t.wr, t.rx, t.tx} {
 			charts += t.chart(sample, 6, 1, 100, func(float64) colorT { return c })[0] + " "
 		}
 		body := []string{
 			t.tab.Render("1 Tab") + "   " + t.dim.Render("2 ") + t.subtle.Render("Tab") + "   " + t.key.Render("⏎") + " " + t.subtle.Render("open") + "   " + t.navText.Render("Link ›"),
 			"A selected row",
-			t.statusIcon(health.OK) + " " + t.statusIcon(health.Info) + " " + t.statusIcon(health.Warn) + " " + t.statusIcon(health.Crit) + "  " + t.gauge(62, 12, t.disk) + "  " + paint(t.cpu, "cpu") + " " + paint(t.mem, "mem") + " " + paint(t.disk, "disk") + " " + paint(t.rx, "in") + " " + paint(t.tx, "out"),
+			t.statusIcon(health.OK) + " " + t.statusIcon(health.Info) + " " + t.statusIcon(health.Warn) + " " + t.statusIcon(health.Crit) + "  " + t.gauge(62, 8, t.disk) + "  " + paint(t.cpu, "cpu") + " " + paint(t.mem, "mem") + " " + paint(t.disk, "disk") + " " + paint(t.wr, "write") + " " + paint(t.rx, "in") + " " + paint(t.tx, "out"),
 			charts,
 			t.buttonFocus.Render("Restart") + " " + t.button.Render("Close") + " " + t.buttonDanger.Render("Remove"),
 		}

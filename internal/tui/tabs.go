@@ -120,7 +120,10 @@ func (m *Model) move(delta int) {
 func (m *Model) openItem(tab tabID, id string) tea.Cmd {
 	m.lists[tab].pick(id, m.items(tab))
 	key := id
-	if (tab == tabOverview || id == "admin") && !strings.HasPrefix(id, "history:") {
+	// The Overview's results, and the Processes tab's charts, which open
+	// the same ones.
+	result := tab == tabOverview || id == "admin" || (tab == tabProcs && !strings.HasPrefix(id, "pid:"))
+	if result && !strings.HasPrefix(id, "history:") {
 		key = "result:" + id
 	}
 	m.modal = &modal{key: key}

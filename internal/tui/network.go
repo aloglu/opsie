@@ -170,13 +170,23 @@ func (m *Model) networkSections(inner int) []section {
 	return out
 }
 
-func (m *Model) trafficSection(inner int) section {
-	// The charts get more room here than on the Overview.
-	grow := m.grow
-	m.grow = 4
-	card := m.netCard(inner)
-	m.grow = grow
-	return section{title: "Traffic", badge: card.badge, entries: []entry{{id: "history:net", lines: card.body, block: true}}}
+// networkPage puts what's coming in and going out above the rest, a card
+// each.
+func (m *Model) networkPage(w int) block {
+	t := m.th
+	n := m.snap.Net
+	ready := m.haveSnap && n.Ready
+	top := m.pair(w,
+		m.rateCard(tabNetwork, "history:net", ready, "Download", t.rx, m.rx, n.RxRate, n.RxTotal, strings.Join(n.Interfaces, " ")),
+		m.rateCard(tabNetwork, "history:net", ready, "Upload", t.tx, m.tx, n.TxRate, n.TxTotal, ""))
+	// The cards stand in for the Traffic section, which is first.
+	return vstack(w, top, m.sectionsPage(tabNetwork, w, 1))
+}
+
+// trafficSection is the traffic as an item. networkPage draws it, as a
+// pair of cards.
+func (m *Model) trafficSection(int) section {
+	return section{title: "Traffic", entries: []entry{{id: "history:net"}}}
 }
 
 func (m *Model) speedSection(inner int) section {

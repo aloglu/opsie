@@ -25,22 +25,27 @@ const (
 	trimAt = int((Keep + 24*time.Hour) / Every)
 )
 
-// Sample is one minute. Percentages are 0–100; Load is per core; Rx and
-// Tx are bytes per second.
+// Sample is one minute. Percentages are 0–100; Load is per core; Rx, Tx
+// and IO (read, then written) are bytes per second.
 type Sample struct {
-	At    time.Time          `json:"t"`
-	CPU   float64            `json:"cpu"`
-	Mem   float64            `json:"mem"`
-	Swap  float64            `json:"swap,omitempty"`
-	Load  float64            `json:"load"`
-	Rx    float64            `json:"rx"`
-	Tx    float64            `json:"tx"`
+	At   time.Time `json:"t"`
+	CPU  float64   `json:"cpu"`
+	Mem  float64   `json:"mem"`
+	Swap float64   `json:"swap,omitempty"`
+	Load float64   `json:"load"`
+	Rx   float64   `json:"rx"`
+	Tx   float64   `json:"tx"`
+	// IO is missing from samples older than the reading.
+	IO    []float64          `json:"io,omitempty"`
 	Disks map[string]float64 `json:"disks,omitempty"`
 }
 
 // FromSnapshot takes a sample's values from a reading.
 func FromSnapshot(s metrics.Snapshot) Sample {
 	out := Sample{At: s.At, CPU: s.CPU, Mem: s.Mem.Percent, Rx: s.Net.RxRate, Tx: s.Net.TxRate}
+	if s.IO.Ready {
+		out.IO = []float64{s.IO.ReadRate, s.IO.WriteRate}
+	}
 	if s.Swap.Total > 0 {
 		out.Swap = s.Swap.Percent
 	}
