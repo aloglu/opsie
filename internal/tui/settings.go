@@ -97,9 +97,15 @@ var settingGroups = []settingGroup{
 		{key: "agents.claude_limits", label: "Claude plan limits", kind: "choice", options: []string{"on", "off"}, boolean: true,
 			help: "Claude Code doesn't write its plan's limits to disk, so the Agents tab can only show them by asking Anthropic. When this is on, opsie reads the login Claude Code keeps in ~/.claude and asks api.anthropic.com with it, at most every five minutes while the Agents tab is open. The login is only read: never changed, stored or sent anywhere else. Codex's limits need nothing; it writes them down itself."},
 		{key: "agents.openrouter_key", label: "OpenRouter keys", kind: "list", secret: true, optional: true, placeholder: "sk-or-v1-…",
-			help: "One or more OpenRouter API keys. For each, the Agents tab shows what the key has spent today, this week and this month, its spending limit if it has one, and its free-model requests. opsie asks openrouter.ai, at most every five minutes while the Agents tab is open; the keys are sent nowhere else. A management key also shows the account's credits."},
+			help: "One or more OpenRouter API keys. For each, the Agents tab shows what the key has spent today, this week and this month, its spending limit if it has one, and its free-model requests. opsie asks openrouter.ai, at most every five minutes; the keys are sent nowhere else. A management key also shows the account's credits. A key can be given a name from its card on the Agents tab, or written here as name=key."},
 		{key: "agents.deepseek_key", label: "DeepSeek key", kind: "text", secret: true, optional: true, placeholder: "sk-…",
-			help: "A DeepSeek API key. With it the Agents tab shows the account's balance. opsie asks api.deepseek.com, at most every five minutes while the Agents tab is open; the key is sent nowhere else."},
+			help: "A DeepSeek API key. With it the Agents tab shows the account's balance. opsie asks api.deepseek.com, at most every five minutes; the key is sent nowhere else."},
+		{key: "agents.check", label: "Watch spending", kind: "choice", options: []string{"on", "off"}, boolean: true,
+			help: "Keeps asking the services with a key what's left, so the checklist warns when a key's limit, the account's credits or its balance run low, and says when a key is refused or has nothing left. The background checks ask every fifteen minutes and send an alert. When this is off, the services are only asked while the Agents tab is open."},
+		{key: "agents.low_percent", label: "Spending low at", kind: "number:0:100",
+			help: "Percent of a key's spending limit, or of the account's credits, that can be left before it's a warning. 0 only warns once nothing is left."},
+		{key: "agents.low_balance", label: "Balance low at", kind: "number:0:100000",
+			help: "For an account that only shows a balance, like DeepSeek: the balance, in the account's currency, under which it's a warning. 0 only warns once requests are refused."},
 	}},
 	{"Apps", []setting{
 		{key: "apps_dir", label: "Apps folder", kind: "text", placeholder: "~/apps",
@@ -205,12 +211,22 @@ func maskSecrets(v any) string {
 	}
 	var parts []string
 	for _, x := range list {
-		parts = append(parts, maskSecret(fmt.Sprint(x)))
+		parts = append(parts, maskKey(fmt.Sprint(x)))
 	}
 	if len(parts) > 2 {
 		return strconv.Itoa(len(parts)) + " keys"
 	}
 	return strings.Join(parts, ", ")
+}
+
+// maskKey masks a key that may have a name: the name if it has one, or
+// else its last characters.
+func maskKey(entry string) string {
+	k := config.ParseKey(entry)
+	if k.Name != "" {
+		return k.Name
+	}
+	return maskSecret(k.Secret)
 }
 
 func maskSecret(s string) string {
@@ -341,7 +357,8 @@ func (m *Model) settingDetail(key string, b *detailBuilder) detail {
 	case cur == "":
 		shown = t.dim.Render("not set")
 	case s.secret && s.kind == "list":
-		shown = strconv.Itoa(len(splitList(cur))) + " set"
+		list, _ := eff[s.key].([]any)
+		shown = strconv.Itoa(len(list)) + " set"
 	case s.secret:
 		shown = maskSecret(cur)
 	case !set:
@@ -376,9 +393,12 @@ func (m *Model) settingDetail(key string, b *detailBuilder) detail {
 		}
 		fixes = append(fixes, health.Fix{Label: label, Special: "config:add", Args: args(), Done: "Added the key",
 			Input: &health.Input{Prompt: s.label, Arg: "value", Placeholder: s.placeholder, Kind: s.kind, Secret: true}})
-		for _, k := range splitList(cur) {
-			fixes = append(fixes, health.Fix{Label: "Remove " + maskSecret(k), Special: "config:remove", Args: args("value", k), Done: "Removed the key",
-				Danger: true, Confirm: "Stop showing the key ending in " + strings.TrimLeft(maskSecret(k), "•") + "? opsie forgets it; the key itself keeps working."})
+		if list, ok := eff[s.key].([]any); ok {
+			for _, x := range list {
+				k := fmt.Sprint(x)
+				fixes = append(fixes, health.Fix{Label: "Remove " + maskKey(k), Special: "config:remove", Args: args("value", k), Done: "Removed the key",
+					Danger: true, Confirm: "Stop showing the key " + maskKey(k) + "? opsie forgets it; the key itself keeps working."})
+			}
 		}
 		return detail{title: s.label, body: b.body, fixes: fixes}
 	}
@@ -408,7 +428,7 @@ func (m *Model) saveSetting(f health.Fix) tea.Cmd {
 		return nil
 	}
 	var v any
-	if f.Special == "config:add" || f.Special == "config:remove" {
+	if f.Special == "config:add" || f.Special == "config:remove" || f.Special == "config:name" {
 		// Add one item to a list setting.
 		var list []string
 		if cur, ok := m.env.Config.Values()[s.key].([]any); ok {
@@ -418,6 +438,13 @@ func (m *Model) saveSetting(f health.Fix) tea.Cmd {
 		}
 		if f.Special == "config:remove" {
 			list = slices.DeleteFunc(list, func(x string) bool { return x == f.Args["value"] })
+		} else if f.Special == "config:name" {
+			// Give one key of the list a name of its own.
+			for i, x := range list {
+				if x == f.Args["entry"] {
+					list[i] = config.Key{Name: strings.TrimSpace(strings.ReplaceAll(f.Args["value"], "=", " ")), Secret: config.ParseKey(x).Secret}.String()
+				}
+			}
 		} else {
 			// Several can be typed or pasted at once.
 			for _, x := range splitList(f.Args["value"]) {

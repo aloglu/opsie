@@ -127,7 +127,7 @@ func TestServices(t *testing.T) {
 	if list := Services(context.Background(), Keys{}); len(list) != 0 || len(sent) != 0 {
 		t.Fatalf("no keys, nothing to ask: %+v %v", list, sent)
 	}
-	list := Services(context.Background(), Keys{OpenRouter: []string{"or-key"}, DeepSeek: "ds-key"})
+	list := Services(context.Background(), Keys{OpenRouter: []Key{{Secret: "or-key"}}, DeepSeek: "ds-key"})
 	if len(list) != 2 {
 		t.Fatalf("got %+v", list)
 	}
@@ -144,11 +144,12 @@ func TestServices(t *testing.T) {
 		t.Errorf("sent %v", sent)
 	}
 	// Several OpenRouter keys are each asked, and come back in order.
-	many := Services(context.Background(), Keys{OpenRouter: []string{"wrong", "or-key"}, DeepSeek: "ds-key"})
-	if len(many) != 3 || many[0].ID != "openrouter" || many[0].N != 0 || many[0].Err == "" || many[1].N != 1 || many[1].Err != "" || many[1].Month != 12.4 || many[2].ID != "deepseek" {
+	many := Services(context.Background(), Keys{OpenRouter: []Key{{Secret: "wrong-key-1234"}, {Name: "work", Secret: "or-key"}}, DeepSeek: "ds-key"})
+	if len(many) != 3 || many[0].ID != "openrouter" || many[0].N != 0 || many[0].Err == "" || many[1].N != 1 || many[1].Err != "" || many[1].Month != 12.4 || many[2].ID != "deepseek" ||
+		!many[0].Refused() || many[0].Tail != "1234" || many[0].Ref() != "openrouter" || many[1].KeyName != "work" || many[1].Ref() != "openrouter#2" {
 		t.Errorf("several keys: %+v", many)
 	}
-	if bad := Services(context.Background(), Keys{OpenRouter: []string{"wrong"}}); bad[0].Err != "the key was refused" {
+	if bad := Services(context.Background(), Keys{OpenRouter: []Key{{Secret: "wrong"}}}); bad[0].Err != "the key was refused" {
 		t.Errorf("a refused key: %+v", bad[0])
 	}
 }

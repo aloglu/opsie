@@ -96,6 +96,7 @@ func Run(ctx context.Context, opt Options) error {
 	logf("opsie %s watching, state in %s", opt.Version, opt.StateDir)
 	nb := &nightly{opt: opt, call: priv.Local{}.Call, logf: logf}
 	go nb.loop(ctx)
+	sp := &spendWatch{}
 
 	for {
 		select {
@@ -109,7 +110,7 @@ func Run(ctx context.Context, opt Options) error {
 			st.Problems = append([]string{cfgErr.Error()}, st.Problems...)
 		}
 		now := time.Now()
-		results, snap, f := check(ctx, collector, cfg, opt.User, ReadBackups(opt.StateDir))
+		results, snap, f := check(ctx, collector, cfg, opt.User, ReadBackups(opt.StateDir), sp.read(ctx, cfg.Agents, now))
 		if err := rec.Add(history.FromSnapshot(snap)); err != nil {
 			logf("couldn't record the history: %v", err)
 		}
@@ -177,14 +178,14 @@ func Run(ctx context.Context, opt Options) error {
 	}
 }
 
-func check(ctx context.Context, c *metrics.Collector, cfg config.Config, user string, runs []health.BackupRun) ([]health.Result, metrics.Snapshot, facts.Facts) {
+func check(ctx context.Context, c *metrics.Collector, cfg config.Config, user string, runs []health.BackupRun, spend health.Spending) ([]health.Result, metrics.Snapshot, facts.Facts) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	snap := c.Collect(ctx)
 	f := facts.GatherFor(ctx, priv.Local{}, nil, user)
 	f.CheckOnline(ctx, cfg)
 	return health.Evaluate(health.Readings{Snap: snap, HaveSnap: true, Facts: f, HaveFacts: true, Thresholds: cfg.Thresholds, Sites: cfg.Sites, PublicPorts: cfg.Docker.PublicPorts,
-		Nightly: health.Nightly{Apps: cfg.Backup.Nightly, At: cfg.Backup.At, Runs: runs, Running: true}, HaveNightly: true}), snap, f
+		Nightly: health.Nightly{Apps: cfg.Backup.Nightly, At: cfg.Backup.At, Runs: runs, Running: true}, HaveNightly: true, Spending: spend}), snap, f
 }
 
 func loadState(path string) *watch.State {

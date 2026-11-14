@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,6 +37,8 @@ type agentsState struct {
 	// services are the pay-as-you-go services with a key, as last asked.
 	services   []agents.Service
 	servicesAt time.Time
+	// asking is set while the services are asked for the checklist.
+	asking bool
 }
 
 type claudeLimits struct {
@@ -52,6 +53,8 @@ type agentsMsg struct {
 	claude   *claudeLimits
 	services []agents.Service
 	asked    bool
+	// only is set when just the services were asked, not the logs read.
+	only bool
 }
 
 func (m *Model) agentsPoll(again bool) tea.Cmd {
@@ -61,7 +64,7 @@ func (m *Model) agentsPoll(again bool) tea.Cmd {
 	}
 	a.loading = true
 	ask := m.env.Config.Agents.ClaudeLimits && (again || time.Since(a.claude.at) > limitsFresh)
-	keys := agents.Keys{OpenRouter: slices.Clone(m.env.Config.Agents.OpenRouterKey), DeepSeek: m.env.Config.Agents.DeepSeekKey}
+	keys := m.env.Config.Agents.Keys()
 	askServices := again || time.Since(a.servicesAt) > limitsFresh
 	return func() tea.Msg {
 		home, err := os.UserHomeDir()
@@ -88,8 +91,46 @@ func (m *Model) agentsPoll(again bool) tea.Cmd {
 	}
 }
 
+// spendPoll asks the services what their keys have left when that hasn't
+// been asked lately, whatever tab is open, so the checklist can say when
+// one runs low. It rides on the checks' schedule.
+func (m *Model) spendPoll() tea.Cmd {
+	a := &m.agents
+	cfg := m.env.Config.Agents
+	keys := cfg.Keys()
+	if !cfg.Check || !keys.Any() || a.loading || a.asking || time.Since(a.servicesAt) <= limitsFresh {
+		return nil
+	}
+	a.asking = true
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return agentsMsg{services: agents.Services(ctx, keys), asked: true, only: true}
+	}
+}
+
+// spending is what the checklist is told about the keys.
+func (m *Model) spending() health.Spending {
+	cfg := m.env.Config.Agents
+	if !cfg.Check || m.agents.servicesAt.IsZero() {
+		return health.Spending{}
+	}
+	var list []agents.Service
+	for _, s := range m.agents.services {
+		if s.N < len(m.serviceKeys(s.ID)) {
+			list = append(list, s)
+		}
+	}
+	return health.Spending{Services: list, LowPercent: cfg.LowPercent, LowBalance: cfg.LowBalance}
+}
+
 func (m *Model) agentsUpdated(msg agentsMsg) {
 	a := &m.agents
+	if msg.only {
+		a.asking = false
+		a.services, a.servicesAt = msg.services, time.Now()
+		return
+	}
 	a.list, a.at, a.loading = msg.list, time.Now(), false
 	if msg.claude != nil {
 		a.claude = *msg.claude
@@ -185,6 +226,11 @@ func (m *Model) agentsSections(inner int) []section {
 	shown := map[string]int{}
 	for _, s := range m.agents.services {
 		if s.N < len(m.serviceKeys(s.ID)) {
+			if shown[s.ID] == 0 {
+				if total, ok := m.spendTotal(s.ID, inner); ok {
+					out = append(out, total)
+				}
+			}
 			out = append(out, m.serviceSection(s, inner))
 			shown[s.ID]++
 		}
@@ -229,29 +275,62 @@ func (m *Model) serviceKeys(id string) []string {
 	cfg := m.env.Config.Agents
 	switch {
 	case id == "openrouter":
-		return cfg.OpenRouterKey
+		var out []string
+		for _, k := range cfg.OpenRouterKey {
+			out = append(out, k.String())
+		}
+		return out
 	case id == "deepseek" && cfg.DeepSeekKey != "":
 		return []string{cfg.DeepSeekKey}
 	}
 	return nil
 }
 
-// serviceRef names one key of a service among the tab's items.
-func serviceRef(s agents.Service) string {
-	if s.N == 0 {
-		return s.ID
+// keyName tells a service's keys apart: by the name you gave the key, the
+// one the service gave it, or else by the key's last characters.
+func (m *Model) keyName(s agents.Service) string {
+	switch {
+	case s.KeyName != "":
+		return s.KeyName
+	case s.Label != "":
+		return s.Label
+	case len(m.serviceKeys(s.ID)) > 1 && s.Tail != "":
+		return "••••" + s.Tail
 	}
-	return s.ID + "#" + strconv.Itoa(s.N+1)
+	return ""
 }
 
-// keyName tells a service's keys apart: by the name the service gave the
-// key, or else by the key's last characters.
-func (m *Model) keyName(s agents.Service) string {
-	keys := m.serviceKeys(s.ID)
-	if s.Label != "" || len(keys) < 2 || s.N >= len(keys) {
-		return s.Label
+// spendTotal adds up what a service's keys have spent, when it has more
+// than one that answered.
+func (m *Model) spendTotal(id string, inner int) (section, bool) {
+	t := m.th
+	var today, week, month float64
+	n, name := 0, ""
+	for _, s := range m.agents.services {
+		if s.ID == id && s.HaveSpend && s.N < len(m.serviceKeys(id)) {
+			today, week, month = today+s.Today, week+s.Week, month+s.Month
+			n, name = n+1, s.Name
+		}
 	}
-	return maskSecret(keys[s.N])
+	if n < 2 {
+		return section{}, false
+	}
+	badge := "all " + strconv.Itoa(n) + " keys"
+	if have := len(m.serviceKeys(id)); n < have {
+		badge = strconv.Itoa(n) + " of " + strconv.Itoa(have) + " keys"
+	}
+	sec := section{title: name, badge: t.subtle.Render(badge)}
+	for _, p := range []struct {
+		label string
+		v     float64
+	}{{"Today", today}, {"This week", week}, {"This month", month}} {
+		right := t.dim.Render("nothing")
+		if p.v > 0 {
+			right = t.bold.Render(money("", p.v))
+		}
+		sec.intro = append(sec.intro, m.itemRow(t.subtle.Render(p.label), right, inner)...)
+	}
+	return sec, true
 }
 
 func (m *Model) serviceSection(s agents.Service, inner int) section {
@@ -267,7 +346,7 @@ func (m *Model) serviceSection(s agents.Service, inner int) section {
 		// With several keys, which one to change is asked in its popup.
 		sec.entries = []entry{{id: "set:agents." + s.ID + "_key", lines: m.action("Change the key", inner)}}
 		if len(m.serviceKeys(s.ID)) > 1 {
-			sec.entries = []entry{{id: "service:" + serviceRef(s), lines: m.action("Remove or replace the key", inner)}}
+			sec.entries = []entry{{id: "service:" + s.Ref(), lines: m.action("Remove or replace the key", inner)}}
 		}
 		return sec
 	}
@@ -328,7 +407,7 @@ func (m *Model) serviceSection(s agents.Service, inner int) section {
 	if s.FreeLimit > 0 && s.FreeUsed > 0 {
 		lines = append(lines, m.itemRow(t.subtle.Render("Free models"), fmt.Sprintf("%d of %d requests today", s.FreeUsed, s.FreeLimit), inner)...)
 	}
-	sec.entries = []entry{{id: "service:" + serviceRef(s), lines: lines, block: true}}
+	sec.entries = []entry{{id: "service:" + s.Ref(), lines: lines, block: true}}
 	return sec
 }
 
@@ -336,7 +415,7 @@ func (m *Model) serviceDetail(ref string, b *detailBuilder) detail {
 	t := m.th
 	for _, s := range m.agents.services {
 		keys := m.serviceKeys(s.ID)
-		if serviceRef(s) != ref || s.N >= len(keys) {
+		if s.Ref() != ref || s.N >= len(keys) {
 			continue
 		}
 		id := s.ID
@@ -350,7 +429,13 @@ func (m *Model) serviceDetail(ref string, b *detailBuilder) detail {
 		// has them added and removed.
 		manage := []health.Fix{{Label: "Change the key", Special: "open:settings:set:agents." + id + "_key"}}
 		if many {
+			name := health.Fix{Label: "Name this key", Special: "config:name", Args: map[string]string{"key": "agents." + id + "_key", "entry": keys[s.N]}, Done: "Named the key {value}",
+				Input: &health.Input{Prompt: "A name for this key", Arg: "value", Placeholder: "work", Kind: "text", Value: s.KeyName}}
+			if s.KeyName != "" {
+				name.Label = "Rename"
+			}
 			manage = []health.Fix{
+				name,
 				{Label: "Add another key", Special: "open:settings:set:agents." + id + "_key"},
 				{Label: "Remove this key", Special: "config:remove", Args: map[string]string{"key": "agents." + id + "_key", "value": keys[s.N]},
 					Danger: true, Confirm: "Stop showing this " + s.Name + " key? opsie forgets it; the key itself keeps working.", Done: "Removed the key"},
@@ -365,6 +450,9 @@ func (m *Model) serviceDetail(ref string, b *detailBuilder) detail {
 		st := health.Info
 		if s.Blocked {
 			st, word = health.Crit, "nothing left"
+		}
+		if s.KeyName != "" {
+			b.kv("Name", s.KeyName)
 		}
 		if s.Label != "" {
 			b.kv("Key", s.Label)
@@ -409,7 +497,7 @@ func (m *Model) serviceDetail(ref string, b *detailBuilder) detail {
 			b.text("The account's credits only show with a management key; an ordinary key can see its own spending and limit.", t.subtle)
 		}
 		b.text("Asked of "+host+" "+human.Duration(m.now.Sub(m.agents.servicesAt))+" ago, with the key in Settings. The key is sent nowhere else.", t.dim)
-		return detail{title: s.Name, headline: headline(t, st, word, s.Label), body: b.body,
+		return detail{title: s.Name, headline: headline(t, st, word, m.keyName(s)), body: b.body,
 			fixes: append([]health.Fix{{Label: "Ask again", Special: "agents:refresh"}}, manage...)}
 	}
 	b.text("This service has no key anymore.", t.subtle)

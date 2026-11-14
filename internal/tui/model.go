@@ -330,7 +330,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.tab == tabAgents || m.tab == tabNetwork {
 			again = m.tabPoll()
 		}
-		return m, tea.Batch(m.scheduleFacts(), again)
+		return m, tea.Batch(m.scheduleFacts(), again, m.spendPoll())
 
 	case histMsg:
 		m.histUpdated(msg)
@@ -354,7 +354,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.speedDone(msg)
 	case agentsMsg:
 		m.agentsUpdated(msg)
-		m.syncLists()
+		m.evaluate()
 		return m, nil
 	case copyDoneMsg:
 		return m, m.copyDone(msg)
@@ -467,6 +467,7 @@ func (m *Model) evaluate() {
 		PublicPorts: m.env.Config.Docker.PublicPorts,
 		Update:      m.updateVersion,
 		Watcher:     m.watcher, HaveWatcher: m.haveWatcher,
+		Spending: m.spending(),
 	})
 	m.syncLists()
 }

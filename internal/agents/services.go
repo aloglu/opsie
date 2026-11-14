@@ -15,9 +15,17 @@ import (
 // Keys are the API keys of the services to ask, as set in config.toml.
 // An empty one isn't asked. OpenRouter can have several.
 type Keys struct {
-	OpenRouter []string
+	OpenRouter []Key
 	DeepSeek   string
 }
+
+// Key is an API key and what its owner calls it, if anything.
+type Key struct {
+	Name, Secret string
+}
+
+// Any reports whether there's a key to ask with.
+func (k Keys) Any() bool { return len(k.OpenRouter) > 0 || k.DeepSeek != "" }
 
 // ServiceInfo describes a service opsie can ask about spending.
 type ServiceInfo struct {
@@ -45,8 +53,10 @@ type Balance struct {
 // has spent, and what's left to spend.
 type Service struct {
 	ID, Name string
-	// N is which of the service's keys this is, from 0.
-	N int
+	// N is which of the service's keys this is, from 0. KeyName is what
+	// its owner calls it, and Tail the key's last characters.
+	N             int
+	KeyName, Tail string
 	// Label is the key's name at the service.
 	Label string
 	// Spent with this key, in dollars: today, this week (from Monday) and
@@ -75,16 +85,20 @@ type Service struct {
 func Services(ctx context.Context, keys Keys) []Service {
 	var asks []func() Service
 	for i, key := range keys.OpenRouter {
-		if key != "" {
+		if key.Secret != "" {
 			asks = append(asks, func() Service {
-				s := openRouter(ctx, key)
-				s.N = i
+				s := openRouter(ctx, key.Secret)
+				s.N, s.KeyName, s.Tail = i, key.Name, tail(key.Secret)
 				return s
 			})
 		}
 	}
 	if keys.DeepSeek != "" {
-		asks = append(asks, func() Service { return deepSeek(ctx, keys.DeepSeek) })
+		asks = append(asks, func() Service {
+			s := deepSeek(ctx, keys.DeepSeek)
+			s.Tail = tail(keys.DeepSeek)
+			return s
+		})
 	}
 	out := make([]Service, len(asks))
 	var wg sync.WaitGroup
@@ -98,6 +112,27 @@ func Services(ctx context.Context, keys Keys) []Service {
 	wg.Wait()
 	return out
 }
+
+// tail is the end of a key, enough to tell it from another.
+func tail(key string) string {
+	if len(key) <= 8 {
+		return ""
+	}
+	return key[len(key)-4:]
+}
+
+// Ref names one key of a service: the service's ID, and from the second
+// key on which one it is.
+func (s Service) Ref() string {
+	if s.N == 0 {
+		return s.ID
+	}
+	return s.ID + "#" + strconv.Itoa(s.N+1)
+}
+
+// Refused reports whether the service turned the key away, rather than
+// not being reached.
+func (s Service) Refused() bool { return s.Err == errStatus(401).Error() }
 
 var (
 	openRouterURL = "https://openrouter.ai/api/v1"

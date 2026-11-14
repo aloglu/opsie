@@ -70,13 +70,17 @@ func (m *Model) runFix(f health.Fix) tea.Cmd {
 		for _, tb := range tabs {
 			if strings.EqualFold(tb.name, name) {
 				cmd := m.switchTab(tb.id)
+				if id == "" {
+					m.modal = nil
+					return cmd
+				}
 				return tea.Batch(cmd, m.openItem(tb.id, id))
 			}
 		}
 		return nil
 	case f.Special == "motd:on" || f.Special == "motd:off":
 		return m.loginSummary(f.Special == "motd:on")
-	case f.Special == "config:set" || f.Special == "config:unset" || f.Special == "config:add" || f.Special == "config:remove":
+	case f.Special == "config:set" || f.Special == "config:unset" || f.Special == "config:add" || f.Special == "config:remove" || f.Special == "config:name":
 		return m.saveSetting(f)
 	case strings.HasPrefix(f.Special, "explore:"):
 		return m.explore(strings.TrimPrefix(f.Special, "explore:"), false)

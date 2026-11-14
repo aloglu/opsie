@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/aloglu/opsie/internal/agents"
 )
 
 // Config is the contents of config.toml. Every field is optional.
@@ -71,11 +73,44 @@ type Agents struct {
 	// OpenRouter can have several.
 	OpenRouterKey Keys   `toml:"openrouter_key"`
 	DeepSeekKey   string `toml:"deepseek_key"`
+	// Check has the keys asked about in the background too, so running
+	// low shows on the checklist and in alerts.
+	Check bool `toml:"check"`
+	// LowPercent is how much of a key's limit, or of the account's
+	// credits, can be left before it counts as low. LowBalance is the
+	// same for an account that only has a balance, in its currency.
+	LowPercent float64 `toml:"low_percent"`
+	LowBalance float64 `toml:"low_balance"`
 }
 
+// Key is an API key, and a name for it if it was given one. In the file
+// it's "key", or "name=key".
+type Key struct {
+	Name, Secret string
+}
+
+// ParseKey reads a key as the file writes it.
+func ParseKey(s string) Key {
+	// A key has no "=" in it, so the last one ends the name.
+	if i := strings.LastIndex(s, "="); i >= 0 {
+		return Key{Name: strings.TrimSpace(s[:i]), Secret: strings.TrimSpace(s[i+1:])}
+	}
+	return Key{Secret: strings.TrimSpace(s)}
+}
+
+func (k Key) String() string {
+	if k.Name == "" {
+		return k.Secret
+	}
+	return k.Name + "=" + k.Secret
+}
+
+// MarshalText writes the key as the file holds it.
+func (k Key) MarshalText() ([]byte, error) { return []byte(k.String()), nil }
+
 // Keys is one API key or several: the file may say key = "a" or
-// key = ["a", "b"].
-type Keys []string
+// key = ["a", "work=b"].
+type Keys []Key
 
 // UnmarshalTOML reads a string or a list of them, leaving out empty and
 // repeated keys.
@@ -95,12 +130,22 @@ func (k *Keys) UnmarshalTOML(v any) error {
 		if !ok {
 			return fmt.Errorf("a key is text, or a list of them")
 		}
-		if s = strings.TrimSpace(s); s != "" && !slices.Contains(out, s) {
-			out = append(out, s)
+		key := ParseKey(s)
+		if key.Secret != "" && !slices.ContainsFunc(out, func(o Key) bool { return o.Secret == key.Secret }) {
+			out = append(out, key)
 		}
 	}
 	*k = out
 	return nil
+}
+
+// Keys are the services' keys, for asking them.
+func (a Agents) Keys() agents.Keys {
+	keys := agents.Keys{DeepSeek: a.DeepSeekKey}
+	for _, k := range a.OpenRouterKey {
+		keys.OpenRouter = append(keys.OpenRouter, agents.Key{Name: k.Name, Secret: k.Secret})
+	}
+	return keys
 }
 
 // Docker holds settings about containers.
@@ -265,6 +310,7 @@ func Default() Config {
 		Notify:     Notify{Level: "warn", RepeatHours: 12, Logins: "new"},
 		Sites:      Sites{Check: true, SlowSeconds: 5},
 		Images:     Images{Check: true},
+		Agents:     Agents{Check: true, LowPercent: 10, LowBalance: 1},
 		Theme:      "opsie",
 		Background: "auto",
 		AppsDir:    "~/apps",
@@ -325,6 +371,12 @@ func (c *Config) clamp() {
 	}
 	if c.Sites.SlowSeconds < 0.5 || c.Sites.SlowSeconds > 60 {
 		c.Sites.SlowSeconds = d.Sites.SlowSeconds
+	}
+	if c.Agents.LowPercent < 0 || c.Agents.LowPercent > 100 {
+		c.Agents.LowPercent = d.Agents.LowPercent
+	}
+	if c.Agents.LowBalance < 0 {
+		c.Agents.LowBalance = d.Agents.LowBalance
 	}
 	n := &c.Notify
 	if n.Level != "warn" && n.Level != "crit" {

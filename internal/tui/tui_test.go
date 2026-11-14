@@ -238,7 +238,7 @@ func newTabs(m *Model) {
 
 // services gives the Agents tab two services with keys.
 func services(m *Model) {
-	m.env.Config.Agents.OpenRouterKey, m.env.Config.Agents.DeepSeekKey = config.Keys{"sk-or-v1-test"}, "sk-test"
+	m.env.Config.Agents.OpenRouterKey, m.env.Config.Agents.DeepSeekKey = config.Keys{{Secret: "sk-or-v1-test"}}, "sk-test"
 	m.agents.servicesAt = time.Now()
 	m.agents.services = []agents.Service{
 		{ID: "openrouter", Name: "OpenRouter", Label: "sk-or-v1-abc...123", HaveSpend: true, Today: 0.0042, Week: 3.1, Month: 12.4, AllTime: 25.75,
@@ -273,10 +273,10 @@ var screens = map[string]func(m *Model){
 	"agents-keys": func(m *Model) {
 		newTabs(m)
 		services(m)
-		m.env.Config.Agents.OpenRouterKey = config.Keys{"sk-or-v1-test", "sk-or-v1-other7777", "sk-or-v1-third8888"}
+		m.env.Config.Agents.OpenRouterKey = config.Keys{{Secret: "sk-or-v1-test"}, {Name: "side project", Secret: "sk-or-v1-other7777"}, {Secret: "sk-or-v1-third8888"}}
 		m.agents.services = append(m.agents.services[:1:1],
-			agents.Service{ID: "openrouter", Name: "OpenRouter", N: 1, Label: "sk-or-v1-def...456", HaveSpend: true, Today: 1.2, Week: 6.5, Month: 31, AllTime: 80, FreeUsed: 3, FreeLimit: 50},
-			agents.Service{ID: "openrouter", Name: "OpenRouter", N: 2, Err: "the key was refused"},
+			agents.Service{ID: "openrouter", Name: "OpenRouter", N: 1, KeyName: "side project", Tail: "7777", Label: "sk-or-v1-def...456", HaveSpend: true, Today: 1.2, Week: 6.5, Month: 31, AllTime: 80, FreeUsed: 3, FreeLimit: 50},
+			agents.Service{ID: "openrouter", Name: "OpenRouter", N: 2, Tail: "8888", Err: "the key was refused"},
 			m.agents.services[1])
 		m.switchTab(tabAgents)
 		m.move(1 << 20)
@@ -1944,15 +1944,32 @@ func TestSeveralOpenRouterKeys(t *testing.T) {
 	add("Add a key", "sk-or-v1-first1111")
 	add("Add another key", "sk-or-v1-second2222")
 	add("Add another key", "sk-or-v1-first1111") // again: not kept twice
-	if got := m.env.Config.Agents.OpenRouterKey; !slices.Equal(got, config.Keys{"sk-or-v1-first1111", "sk-or-v1-second2222"}) {
+	if got := m.env.Config.Agents.OpenRouterKey; !slices.Equal(got, config.Keys{{Secret: "sk-or-v1-first1111"}, {Secret: "sk-or-v1-second2222"}}) {
 		t.Fatalf("keys %q", got)
 	}
 
 	// Each key has its own card; one that failed is told apart by its end.
 	m.agents.loading, m.agents.servicesAt = false, time.Now()
 	m.agents.services = []agents.Service{
-		{ID: "openrouter", Name: "OpenRouter", N: 0, Label: "work", HaveSpend: true, Month: 12.4},
-		{ID: "openrouter", Name: "OpenRouter", N: 1, Err: "the key was refused"},
+		{ID: "openrouter", Name: "OpenRouter", N: 0, Tail: "1111", Label: "sk-or-v1-fir...111", HaveSpend: true, Month: 12.4},
+		{ID: "openrouter", Name: "OpenRouter", N: 1, Tail: "2222", Err: "the key was refused"},
+	}
+
+	// A key can be given a name, which the file keeps with it.
+	m.openItem(tabAgents, "service:openrouter")
+	m.chooseFix(fix(m.modal.key, "Name this key"))
+	m.modal.input.SetValue("work")
+	m.submitInput()
+	if got := m.env.Config.Agents.OpenRouterKey; len(got) != 2 || got[0].Name != "work" || got[0].Secret != "sk-or-v1-first1111" {
+		t.Fatalf("named: %+v", got)
+	}
+	m.agents.loading = false
+	m.agents.services[0].KeyName = "work"
+
+	// The refused key is on the checklist, and stops being once it's gone.
+	m.evaluate()
+	if i := slices.IndexFunc(m.results, func(r health.Result) bool { return r.ID == "spend:openrouter:2222" }); i < 0 || m.results[i].Status != health.Warn || m.results[i].Title != "OpenRouter key ••••2222" {
+		t.Fatalf("the refused key isn't on the checklist: %+v", m.results)
 	}
 	ids := strings.Join(m.items(tabAgents), " ")
 	for _, want := range []string{"service:openrouter ", "service:openrouter#2", "set:agents.openrouter_key", "set:agents.deepseek_key"} {
@@ -1978,12 +1995,16 @@ func TestSeveralOpenRouterKeys(t *testing.T) {
 		t.Fatal("removing a key should ask first")
 	}
 	m.runFix(remove)
-	if got := m.env.Config.Agents.OpenRouterKey; !slices.Equal(got, config.Keys{"sk-or-v1-first1111"}) {
+	if got := m.env.Config.Agents.OpenRouterKey; !slices.Equal(got, config.Keys{{Name: "work", Secret: "sk-or-v1-first1111"}}) {
 		t.Fatalf("keys after removing one: %q", got)
 	}
 	m.switchTab(tabSettings)
 	m.openItem(tabSettings, "set:agents.openrouter_key")
-	m.runFix(fix(m.modal.key, "Remove ••••1111"))
+	m.runFix(fix(m.modal.key, "Remove work"))
+	m.evaluate()
+	if slices.ContainsFunc(m.results, func(r health.Result) bool { return strings.HasPrefix(r.ID, "spend") }) {
+		t.Error("with no keys left, the checklist still talks about spending")
+	}
 	if got := m.env.Config.Agents.OpenRouterKey; len(got) != 0 {
 		t.Fatalf("keys after removing both: %q", got)
 	}

@@ -38,8 +38,11 @@ check = true            # ask registries about newer images every 6 hours
 
 [agents]
 claude_limits = false   # ask Anthropic for the Claude plan's limits, with Claude Code's login
-openrouter_key = ""     # show what an OpenRouter key has spent; several as ["sk-or-…", "sk-or-…"]
+openrouter_key = ""     # show what an OpenRouter key has spent; several as ["sk-or-…", "work=sk-or-…"], a name before = is optional
 deepseek_key = ""       # show a DeepSeek account's balance
+check = true            # warn and alert when a key runs low, runs out or is refused
+low_percent = 10        # percent of a key's limit or the account's credits left that counts as low; 0 for never
+low_balance = 1         # a balance, in the account's currency, that counts as low; 0 for never
 
 [sites]
 check = true            # visit every tunnel hostname every two minutes

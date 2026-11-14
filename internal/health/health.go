@@ -92,6 +92,9 @@ type Readings struct {
 	// Nightly is the nightly backup setup, when it's known.
 	Nightly     Nightly
 	HaveNightly bool
+	// Spending is what the services paid by use said, when they've been
+	// asked.
+	Spending Spending
 }
 
 // Evaluate runs every check, worst results first.
@@ -132,6 +135,7 @@ func Evaluate(in Readings) []Result {
 		}
 		add(nightlyBackups(in.Nightly, now)...)
 	}
+	add(spending(in.Spending)...)
 	if in.HaveWatcher && in.HaveFacts {
 		add(watcher(in.Watcher, in.Facts.At))
 	}
