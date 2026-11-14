@@ -89,3 +89,30 @@ func TestThemeAndApps(t *testing.T) {
 		t.Error("default apps dir")
 	}
 }
+
+func TestOpenRouterKeyIsOneOrSeveral(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	for text, want := range map[string]Keys{
+		`openrouter_key = "sk-a"`:                         {"sk-a"},
+		`openrouter_key = ""`:                             {},
+		`openrouter_key = ["sk-a", " sk-b ", "", "sk-a"]`: {"sk-a", "sk-b"},
+	} {
+		os.WriteFile(path, []byte("[agents]\n"+text+"\n"), 0o600)
+		cfg, err := Load(path)
+		if err != nil || !reflect.DeepEqual(cfg.Agents.OpenRouterKey, want) {
+			t.Errorf("%s: %q %v", text, cfg.Agents.OpenRouterKey, err)
+		}
+	}
+	// A list written by Settings reads back, and replaces a single key.
+	os.WriteFile(path, []byte("[agents]\nopenrouter_key = \"sk-a\"\n"), 0o600)
+	if err := Set(path, "agents.openrouter_key", []string{"sk-a", "sk-b"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil || !reflect.DeepEqual(cfg.Agents.OpenRouterKey, Keys{"sk-a", "sk-b"}) {
+		t.Fatalf("%q %v", cfg.Agents.OpenRouterKey, err)
+	}
+	if v, ok := cfg.Values()["agents.openrouter_key"].([]any); !ok || len(v) != 2 {
+		t.Errorf("values: %#v", cfg.Values()["agents.openrouter_key"])
+	}
+}

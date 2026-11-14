@@ -8,25 +8,29 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
 
 // Keys are the API keys of the services to ask, as set in config.toml.
-// An empty one isn't asked.
+// An empty one isn't asked. OpenRouter can have several.
 type Keys struct {
-	OpenRouter, DeepSeek string
+	OpenRouter []string
+	DeepSeek   string
 }
 
 // ServiceInfo describes a service opsie can ask about spending.
 type ServiceInfo struct {
 	// ID is also the name of its key in config.toml, before "_key".
 	ID, Name, Host string
+	// Many is set when the service can have more than one key.
+	Many bool
 }
 
 // Known are the services that can be asked, in the order they're shown.
 var Known = []ServiceInfo{
-	{"openrouter", "OpenRouter", "openrouter.ai"},
-	{"deepseek", "DeepSeek", "api.deepseek.com"},
+	{"openrouter", "OpenRouter", "openrouter.ai", true},
+	{"deepseek", "DeepSeek", "api.deepseek.com", false},
 }
 
 // Balance is money left in an account, in one currency.
@@ -41,6 +45,8 @@ type Balance struct {
 // has spent, and what's left to spend.
 type Service struct {
 	ID, Name string
+	// N is which of the service's keys this is, from 0.
+	N int
 	// Label is the key's name at the service.
 	Label string
 	// Spent with this key, in dollars: today, this week (from Monday) and
@@ -64,16 +70,32 @@ type Service struct {
 	Err     string
 }
 
-// Services asks every service that has a key. Each key is sent only to
-// its own service.
+// Services asks every service about each key it has, all at once. Each
+// key is sent only to its own service.
 func Services(ctx context.Context, keys Keys) []Service {
-	var out []Service
-	if keys.OpenRouter != "" {
-		out = append(out, openRouter(ctx, keys.OpenRouter))
+	var asks []func() Service
+	for i, key := range keys.OpenRouter {
+		if key != "" {
+			asks = append(asks, func() Service {
+				s := openRouter(ctx, key)
+				s.N = i
+				return s
+			})
+		}
 	}
 	if keys.DeepSeek != "" {
-		out = append(out, deepSeek(ctx, keys.DeepSeek))
+		asks = append(asks, func() Service { return deepSeek(ctx, keys.DeepSeek) })
 	}
+	out := make([]Service, len(asks))
+	var wg sync.WaitGroup
+	for i, ask := range asks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out[i] = ask()
+		}()
+	}
+	wg.Wait()
 	return out
 }
 

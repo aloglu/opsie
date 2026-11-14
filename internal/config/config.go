@@ -68,8 +68,39 @@ type Agents struct {
 	ClaudeLimits bool `toml:"claude_limits"`
 	// OpenRouterKey and DeepSeekKey are API keys for those services; with
 	// one set, the Agents tab asks the service what the key has spent.
-	OpenRouterKey string `toml:"openrouter_key"`
+	// OpenRouter can have several.
+	OpenRouterKey Keys   `toml:"openrouter_key"`
 	DeepSeekKey   string `toml:"deepseek_key"`
+}
+
+// Keys is one API key or several: the file may say key = "a" or
+// key = ["a", "b"].
+type Keys []string
+
+// UnmarshalTOML reads a string or a list of them, leaving out empty and
+// repeated keys.
+func (k *Keys) UnmarshalTOML(v any) error {
+	var list []any
+	switch v := v.(type) {
+	case string:
+		list = []any{v}
+	case []any:
+		list = v
+	default:
+		return fmt.Errorf("a key is text, or a list of them")
+	}
+	out := Keys{}
+	for _, x := range list {
+		s, ok := x.(string)
+		if !ok {
+			return fmt.Errorf("a key is text, or a list of them")
+		}
+		if s = strings.TrimSpace(s); s != "" && !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	*k = out
+	return nil
 }
 
 // Docker holds settings about containers.

@@ -38,7 +38,7 @@ check = true            # ask registries about newer images every 6 hours
 
 [agents]
 claude_limits = false   # ask Anthropic for the Claude plan's limits, with Claude Code's login
-openrouter_key = ""     # show what an OpenRouter key has spent
+openrouter_key = ""     # show what an OpenRouter key has spent; several as ["sk-or-…", "sk-or-…"]
 deepseek_key = ""       # show a DeepSeek account's balance
 
 [sites]

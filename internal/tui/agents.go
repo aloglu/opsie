@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,7 +61,7 @@ func (m *Model) agentsPoll(again bool) tea.Cmd {
 	}
 	a.loading = true
 	ask := m.env.Config.Agents.ClaudeLimits && (again || time.Since(a.claude.at) > limitsFresh)
-	keys := agents.Keys{OpenRouter: m.env.Config.Agents.OpenRouterKey, DeepSeek: m.env.Config.Agents.DeepSeekKey}
+	keys := agents.Keys{OpenRouter: slices.Clone(m.env.Config.Agents.OpenRouterKey), DeepSeek: m.env.Config.Agents.DeepSeekKey}
 	askServices := again || time.Since(a.servicesAt) > limitsFresh
 	return func() tea.Msg {
 		home, err := os.UserHomeDir()
@@ -180,25 +182,27 @@ func (m *Model) agentsSections(inner int) []section {
 	}
 	// Then the services paid by use, and the ones that could be added.
 	cfg := m.env.Config.Agents
-	have := map[string]bool{"openrouter": cfg.OpenRouterKey != "", "deepseek": cfg.DeepSeekKey != ""}
-	shown := map[string]bool{}
+	shown := map[string]int{}
 	for _, s := range m.agents.services {
-		if have[s.ID] {
+		if s.N < len(m.serviceKeys(s.ID)) {
 			out = append(out, m.serviceSection(s, inner))
-			shown[s.ID] = true
+			shown[s.ID]++
 		}
 	}
 	more := section{title: "Services"}
 	for _, k := range agents.Known {
-		switch {
-		case shown[k.ID]:
-		case have[k.ID]:
+		have := len(m.serviceKeys(k.ID))
+		if shown[k.ID] < have {
 			more.intro = append(more.intro, t.dim.Render(fit("Asking "+k.Name+"…", inner)))
-		default:
+		}
+		switch {
+		case have == 0:
 			more.entries = append(more.entries, entry{id: "set:agents." + k.ID + "_key", lines: m.action("Add "+k.Name, inner)})
+		case k.Many:
+			more.entries = append(more.entries, entry{id: "set:agents." + k.ID + "_key", lines: m.action("Add another "+k.Name+" key", inner)})
 		}
 	}
-	if len(more.entries) > 0 && len(shown) == 0 && len(more.intro) == 0 {
+	if len(cfg.OpenRouterKey) == 0 && cfg.DeepSeekKey == "" {
 		more.intro = wrap("Services paid by use can show what a key has spent, once opsie has the key.", inner)
 	}
 	if len(more.entries)+len(more.intro) > 0 {
@@ -220,17 +224,51 @@ func money(currency string, v float64) string {
 	return fmt.Sprintf("%s%.2f", sign, v)
 }
 
+// serviceKeys are the keys opsie has for a service.
+func (m *Model) serviceKeys(id string) []string {
+	cfg := m.env.Config.Agents
+	switch {
+	case id == "openrouter":
+		return cfg.OpenRouterKey
+	case id == "deepseek" && cfg.DeepSeekKey != "":
+		return []string{cfg.DeepSeekKey}
+	}
+	return nil
+}
+
+// serviceRef names one key of a service among the tab's items.
+func serviceRef(s agents.Service) string {
+	if s.N == 0 {
+		return s.ID
+	}
+	return s.ID + "#" + strconv.Itoa(s.N+1)
+}
+
+// keyName tells a service's keys apart: by the name the service gave the
+// key, or else by the key's last characters.
+func (m *Model) keyName(s agents.Service) string {
+	keys := m.serviceKeys(s.ID)
+	if s.Label != "" || len(keys) < 2 || s.N >= len(keys) {
+		return s.Label
+	}
+	return maskSecret(keys[s.N])
+}
+
 func (m *Model) serviceSection(s agents.Service, inner int) section {
 	t := m.th
 	sec := section{title: s.Name}
-	if s.Label != "" {
-		sec.badge = t.subtle.Render(s.Label)
+	if name := m.keyName(s); name != "" {
+		sec.badge = t.subtle.Render(name)
 	}
 	if s.Err != "" {
 		for _, line := range wrap(s.Name+" couldn't be asked: "+s.Err+".", inner) {
 			sec.intro = append(sec.intro, t.warnText.Render(line))
 		}
+		// With several keys, which one to change is asked in its popup.
 		sec.entries = []entry{{id: "set:agents." + s.ID + "_key", lines: m.action("Change the key", inner)}}
+		if len(m.serviceKeys(s.ID)) > 1 {
+			sec.entries = []entry{{id: "service:" + serviceRef(s), lines: m.action("Remove or replace the key", inner)}}
+		}
 		return sec
 	}
 	var lines []string
@@ -290,21 +328,38 @@ func (m *Model) serviceSection(s agents.Service, inner int) section {
 	if s.FreeLimit > 0 && s.FreeUsed > 0 {
 		lines = append(lines, m.itemRow(t.subtle.Render("Free models"), fmt.Sprintf("%d of %d requests today", s.FreeUsed, s.FreeLimit), inner)...)
 	}
-	sec.entries = []entry{{id: "service:" + s.ID, lines: lines, block: true}}
+	sec.entries = []entry{{id: "service:" + serviceRef(s), lines: lines, block: true}}
 	return sec
 }
 
-func (m *Model) serviceDetail(id string, b *detailBuilder) detail {
+func (m *Model) serviceDetail(ref string, b *detailBuilder) detail {
 	t := m.th
 	for _, s := range m.agents.services {
-		if s.ID != id {
+		keys := m.serviceKeys(s.ID)
+		if serviceRef(s) != ref || s.N >= len(keys) {
 			continue
 		}
-		host := ""
+		id := s.ID
+		host, many := "", false
 		for _, k := range agents.Known {
 			if k.ID == id {
-				host = k.Host
+				host, many = k.Host, k.Many
 			}
+		}
+		// A service with one key has it changed; one that can have several
+		// has them added and removed.
+		manage := []health.Fix{{Label: "Change the key", Special: "open:settings:set:agents." + id + "_key"}}
+		if many {
+			manage = []health.Fix{
+				{Label: "Add another key", Special: "open:settings:set:agents." + id + "_key"},
+				{Label: "Remove this key", Special: "config:remove", Args: map[string]string{"key": "agents." + id + "_key", "value": keys[s.N]},
+					Danger: true, Confirm: "Stop showing this " + s.Name + " key? opsie forgets it; the key itself keeps working.", Done: "Removed the key"},
+			}
+		}
+		if s.Err != "" {
+			b.text(s.Name+" couldn't be asked about this key: "+s.Err+".", t.warnText)
+			return detail{title: s.Name, headline: headline(t, health.Warn, "not answering", m.keyName(s)), body: b.body,
+				fixes: append([]health.Fix{{Label: "Ask again", Special: "agents:refresh"}}, manage...)}
 		}
 		word := "in use"
 		st := health.Info
@@ -354,10 +409,8 @@ func (m *Model) serviceDetail(id string, b *detailBuilder) detail {
 			b.text("The account's credits only show with a management key; an ordinary key can see its own spending and limit.", t.subtle)
 		}
 		b.text("Asked of "+host+" "+human.Duration(m.now.Sub(m.agents.servicesAt))+" ago, with the key in Settings. The key is sent nowhere else.", t.dim)
-		return detail{title: s.Name, headline: headline(t, st, word, s.Label), body: b.body, fixes: []health.Fix{
-			{Label: "Ask again", Special: "agents:refresh"},
-			{Label: "Change the key", Special: "open:settings:set:agents." + id + "_key"},
-		}}
+		return detail{title: s.Name, headline: headline(t, st, word, s.Label), body: b.body,
+			fixes: append([]health.Fix{{Label: "Ask again", Special: "agents:refresh"}}, manage...)}
 	}
 	b.text("This service has no key anymore.", t.subtle)
 	return detail{title: "Service", body: b.body}

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -100,8 +101,11 @@ func TestClaudeLimits(t *testing.T) {
 
 func TestServices(t *testing.T) {
 	sent := map[string]string{}
+	var mu sync.Mutex
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		sent[r.URL.Path] = r.Header.Get("Authorization")
+		mu.Unlock()
 		switch r.URL.Path {
 		case "/or/key":
 			if r.Header.Get("Authorization") != "Bearer or-key" {
@@ -123,7 +127,7 @@ func TestServices(t *testing.T) {
 	if list := Services(context.Background(), Keys{}); len(list) != 0 || len(sent) != 0 {
 		t.Fatalf("no keys, nothing to ask: %+v %v", list, sent)
 	}
-	list := Services(context.Background(), Keys{OpenRouter: "or-key", DeepSeek: "ds-key"})
+	list := Services(context.Background(), Keys{OpenRouter: []string{"or-key"}, DeepSeek: "ds-key"})
 	if len(list) != 2 {
 		t.Fatalf("got %+v", list)
 	}
@@ -139,7 +143,12 @@ func TestServices(t *testing.T) {
 	if sent["/or/key"] != "Bearer or-key" || sent["/ds/user/balance"] != "Bearer ds-key" {
 		t.Errorf("sent %v", sent)
 	}
-	if bad := Services(context.Background(), Keys{OpenRouter: "wrong"}); bad[0].Err != "the key was refused" {
+	// Several OpenRouter keys are each asked, and come back in order.
+	many := Services(context.Background(), Keys{OpenRouter: []string{"wrong", "or-key"}, DeepSeek: "ds-key"})
+	if len(many) != 3 || many[0].ID != "openrouter" || many[0].N != 0 || many[0].Err == "" || many[1].N != 1 || many[1].Err != "" || many[1].Month != 12.4 || many[2].ID != "deepseek" {
+		t.Errorf("several keys: %+v", many)
+	}
+	if bad := Services(context.Background(), Keys{OpenRouter: []string{"wrong"}}); bad[0].Err != "the key was refused" {
 		t.Errorf("a refused key: %+v", bad[0])
 	}
 }

@@ -96,8 +96,8 @@ var settingGroups = []settingGroup{
 	{"Agents", []setting{
 		{key: "agents.claude_limits", label: "Claude plan limits", kind: "choice", options: []string{"on", "off"}, boolean: true,
 			help: "Claude Code doesn't write its plan's limits to disk, so the Agents tab can only show them by asking Anthropic. When this is on, opsie reads the login Claude Code keeps in ~/.claude and asks api.anthropic.com with it, at most every five minutes while the Agents tab is open. The login is only read: never changed, stored or sent anywhere else. Codex's limits need nothing; it writes them down itself."},
-		{key: "agents.openrouter_key", label: "OpenRouter key", kind: "text", secret: true, optional: true, placeholder: "sk-or-v1-…",
-			help: "An OpenRouter API key. With it the Agents tab shows what the key has spent today, this week and this month, its spending limit if it has one, and its free-model requests. opsie asks openrouter.ai, at most every five minutes while the Agents tab is open; the key is sent nowhere else. A management key also shows the account's credits."},
+		{key: "agents.openrouter_key", label: "OpenRouter keys", kind: "list", secret: true, optional: true, placeholder: "sk-or-v1-…",
+			help: "One or more OpenRouter API keys. For each, the Agents tab shows what the key has spent today, this week and this month, its spending limit if it has one, and its free-model requests. opsie asks openrouter.ai, at most every five minutes while the Agents tab is open; the keys are sent nowhere else. A management key also shows the account's credits."},
 		{key: "agents.deepseek_key", label: "DeepSeek key", kind: "text", secret: true, optional: true, placeholder: "sk-…",
 			help: "A DeepSeek API key. With it the Agents tab shows the account's balance. opsie asks api.deepseek.com, at most every five minutes while the Agents tab is open; the key is sent nowhere else."},
 	}},
@@ -196,6 +196,23 @@ func formatValue(v any) string {
 	return fmt.Sprint(v)
 }
 
+// maskSecrets masks a secret setting's value: one secret, or a list of
+// them.
+func maskSecrets(v any) string {
+	list, ok := v.([]any)
+	if !ok {
+		return maskSecret(formatValue(v))
+	}
+	var parts []string
+	for _, x := range list {
+		parts = append(parts, maskSecret(fmt.Sprint(x)))
+	}
+	if len(parts) > 2 {
+		return strconv.Itoa(len(parts)) + " keys"
+	}
+	return strings.Join(parts, ", ")
+}
+
 func maskSecret(s string) string {
 	if s == "" {
 		return ""
@@ -231,7 +248,7 @@ func (m *Model) settingsSections(inner int) []section {
 			case v == "":
 				right = t.dim.Render("not set")
 			case s.secret:
-				right = t.subtle.Render(maskSecret(v))
+				right = t.subtle.Render(maskSecrets(eff[s.key]))
 			case !set:
 				right = t.dim.Render(v + " · default")
 			}
@@ -323,6 +340,8 @@ func (m *Model) settingDetail(key string, b *detailBuilder) detail {
 	switch {
 	case cur == "":
 		shown = t.dim.Render("not set")
+	case s.secret && s.kind == "list":
+		shown = strconv.Itoa(len(splitList(cur))) + " set"
 	case s.secret:
 		shown = maskSecret(cur)
 	case !set:
@@ -345,6 +364,21 @@ func (m *Model) settingDetail(key string, b *detailBuilder) detail {
 				label = "✓ " + o
 			}
 			fixes = append(fixes, health.Fix{Label: label, Special: "config:set", Args: args("value", o)})
+		}
+		return detail{title: s.label, body: b.body, fixes: fixes}
+	}
+	if s.secret && s.kind == "list" {
+		// Secrets can't be shown to be edited, so they're added and
+		// removed one at a time.
+		label := "Add a key"
+		if cur != "" {
+			label = "Add another key"
+		}
+		fixes = append(fixes, health.Fix{Label: label, Special: "config:add", Args: args(), Done: "Added the key",
+			Input: &health.Input{Prompt: s.label, Arg: "value", Placeholder: s.placeholder, Kind: s.kind, Secret: true}})
+		for _, k := range splitList(cur) {
+			fixes = append(fixes, health.Fix{Label: "Remove " + maskSecret(k), Special: "config:remove", Args: args("value", k), Done: "Removed the key",
+				Danger: true, Confirm: "Stop showing the key ending in " + strings.TrimLeft(maskSecret(k), "•") + "? opsie forgets it; the key itself keeps working."})
 		}
 		return detail{title: s.label, body: b.body, fixes: fixes}
 	}
@@ -384,8 +418,13 @@ func (m *Model) saveSetting(f health.Fix) tea.Cmd {
 		}
 		if f.Special == "config:remove" {
 			list = slices.DeleteFunc(list, func(x string) bool { return x == f.Args["value"] })
-		} else if !slices.Contains(list, f.Args["value"]) {
-			list = append(list, f.Args["value"])
+		} else {
+			// Several can be typed or pasted at once.
+			for _, x := range splitList(f.Args["value"]) {
+				if !slices.Contains(list, x) {
+					list = append(list, x)
+				}
+			}
 		}
 		v = list
 	} else if f.Special == "config:set" {

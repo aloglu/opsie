@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -237,7 +238,7 @@ func newTabs(m *Model) {
 
 // services gives the Agents tab two services with keys.
 func services(m *Model) {
-	m.env.Config.Agents.OpenRouterKey, m.env.Config.Agents.DeepSeekKey = "sk-or-v1-test", "sk-test"
+	m.env.Config.Agents.OpenRouterKey, m.env.Config.Agents.DeepSeekKey = config.Keys{"sk-or-v1-test"}, "sk-test"
 	m.agents.servicesAt = time.Now()
 	m.agents.services = []agents.Service{
 		{ID: "openrouter", Name: "OpenRouter", Label: "sk-or-v1-abc...123", HaveSpend: true, Today: 0.0042, Week: 3.1, Month: 12.4, AllTime: 25.75,
@@ -268,6 +269,17 @@ var screens = map[string]func(m *Model){
 		services(m)
 		m.switchTab(tabAgents)
 		m.openItem(tabAgents, "service:openrouter")
+	},
+	"agents-keys": func(m *Model) {
+		newTabs(m)
+		services(m)
+		m.env.Config.Agents.OpenRouterKey = config.Keys{"sk-or-v1-test", "sk-or-v1-other7777", "sk-or-v1-third8888"}
+		m.agents.services = append(m.agents.services[:1:1],
+			agents.Service{ID: "openrouter", Name: "OpenRouter", N: 1, Label: "sk-or-v1-def...456", HaveSpend: true, Today: 1.2, Week: 6.5, Month: 31, AllTime: 80, FreeUsed: 3, FreeLimit: 50},
+			agents.Service{ID: "openrouter", Name: "OpenRouter", N: 2, Err: "the key was refused"},
+			m.agents.services[1])
+		m.switchTab(tabAgents)
+		m.move(1 << 20)
 	},
 	"service-refused": func(m *Model) {
 		newTabs(m)
@@ -1883,7 +1895,7 @@ func TestServicesOnAgentsTab(t *testing.T) {
 	m.modal = nil
 	services(m)
 	ids = strings.Join(m.items(tabAgents), " ")
-	if strings.Contains(ids, "set:agents") || !strings.Contains(ids, "service:openrouter") || !strings.Contains(ids, "service:deepseek") {
+	if strings.Contains(ids, "set:agents.deepseek_key") || !strings.Contains(ids, "service:openrouter") || !strings.Contains(ids, "service:deepseek") {
 		t.Fatalf("items with keys: %s", ids)
 	}
 	page := ansi.Strip(m.render())
@@ -1899,6 +1911,81 @@ func TestServicesOnAgentsTab(t *testing.T) {
 	d := m.detailFor("service:openrouter", 60)
 	if body := ansi.Strip(strings.Join(d.body, "\n")); !strings.Contains(body, "$25.75") || !strings.Contains(body, "12 of 1000 requests") || strings.Contains(body, "sk-or-v1-test") {
 		t.Errorf("detail:\n%s", body)
+	}
+}
+
+func TestSeveralOpenRouterKeys(t *testing.T) {
+	m := testModel(t)
+	newTabs(m)
+	m.env.Paths.Config = t.TempDir()
+	m.width, m.height = 130, 50
+	m.switchTab(tabAgents)
+	fix := func(key, label string) health.Fix {
+		t.Helper()
+		for _, f := range m.detailFor(key, 60).fixes {
+			if strings.HasPrefix(f.Label, label) {
+				return f
+			}
+		}
+		t.Fatalf("%s has no %q", key, label)
+		return health.Fix{}
+	}
+	add := func(label, key string) {
+		t.Helper()
+		m.openItem(tabAgents, "set:agents.openrouter_key")
+		f := fix(m.modal.key, label)
+		if f.Input == nil || !f.Input.Secret {
+			t.Fatalf("a key should be asked for, hidden: %+v", f)
+		}
+		m.chooseFix(f)
+		m.modal.input.SetValue(key)
+		m.submitInput()
+	}
+	add("Add a key", "sk-or-v1-first1111")
+	add("Add another key", "sk-or-v1-second2222")
+	add("Add another key", "sk-or-v1-first1111") // again: not kept twice
+	if got := m.env.Config.Agents.OpenRouterKey; !slices.Equal(got, config.Keys{"sk-or-v1-first1111", "sk-or-v1-second2222"}) {
+		t.Fatalf("keys %q", got)
+	}
+
+	// Each key has its own card; one that failed is told apart by its end.
+	m.agents.loading, m.agents.servicesAt = false, time.Now()
+	m.agents.services = []agents.Service{
+		{ID: "openrouter", Name: "OpenRouter", N: 0, Label: "work", HaveSpend: true, Month: 12.4},
+		{ID: "openrouter", Name: "OpenRouter", N: 1, Err: "the key was refused"},
+	}
+	ids := strings.Join(m.items(tabAgents), " ")
+	for _, want := range []string{"service:openrouter ", "service:openrouter#2", "set:agents.openrouter_key", "set:agents.deepseek_key"} {
+		if !strings.Contains(ids+" ", want) {
+			t.Errorf("items lack %q: %s", want, ids)
+		}
+	}
+	page := ansi.Strip(m.render())
+	for _, want := range []string{"work", "••••2222", "$12.40", "Add another OpenRouter key"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the page lacks %q", want)
+		}
+	}
+	if strings.Contains(page, "sk-or-v1") {
+		t.Error("a key is on the page")
+	}
+
+	// Removing asks first, and takes only that key.
+	m.openItem(tabAgents, "service:openrouter#2")
+	remove := fix(m.modal.key, "Remove this key")
+	m.chooseFix(remove)
+	if m.modal == nil || m.modal.stage != stageConfirm {
+		t.Fatal("removing a key should ask first")
+	}
+	m.runFix(remove)
+	if got := m.env.Config.Agents.OpenRouterKey; !slices.Equal(got, config.Keys{"sk-or-v1-first1111"}) {
+		t.Fatalf("keys after removing one: %q", got)
+	}
+	m.switchTab(tabSettings)
+	m.openItem(tabSettings, "set:agents.openrouter_key")
+	m.runFix(fix(m.modal.key, "Remove ••••1111"))
+	if got := m.env.Config.Agents.OpenRouterKey; len(got) != 0 {
+		t.Fatalf("keys after removing both: %q", got)
 	}
 }
 
