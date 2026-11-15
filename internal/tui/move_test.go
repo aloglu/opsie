@@ -169,3 +169,14 @@ func TestOffServerCost(t *testing.T) {
 		t.Error("a cost with no size")
 	}
 }
+
+// A measurement that comes back after the sizes were forgotten, as they
+// are when something frees space, has to have somewhere to go.
+func TestFolderSizeArrivesAfterForgetting(t *testing.T) {
+	m := testModel(t)
+	m.forgetDisk()
+	m.duUpdated(duMsg{path: "/var"})
+	if _, ok := m.du["/var"]; !ok {
+		t.Fatal("the measurement was dropped")
+	}
+}

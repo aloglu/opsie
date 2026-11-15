@@ -898,8 +898,12 @@ func opUFWDeny(ctx context.Context, args map[string]string) (any, error) {
 			return nil, fmt.Errorf("%q isn't an address", ip)
 		}
 	}
-	if ip == args["caller_ip"] {
-		return nil, errors.New("that's the address you're connected from")
+	if mine := net.ParseIP(args["caller_ip"]); mine != nil {
+		one := net.ParseIP(ip)
+		_, many, _ := net.ParseCIDR(ip)
+		if (one != nil && one.Equal(mine)) || (many != nil && many.Contains(mine)) {
+			return nil, errors.New("that would block the address you're connected from")
+		}
 	}
 	// prepend puts the block ahead of any allow rule; it fails when there
 	// are no rules yet, and then order doesn't matter.

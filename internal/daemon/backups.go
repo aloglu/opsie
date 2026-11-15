@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/aloglu/opsie/internal/config"
@@ -81,7 +80,6 @@ func BackupsDir(cfg config.Config, account string, dev bool) string {
 type nightly struct {
 	opt  Options
 	call func(ctx context.Context, op string, args map[string]string, out any) error
-	mu   sync.Mutex
 	logf func(string, ...any)
 }
 
@@ -124,7 +122,7 @@ func (n *nightly) loop(ctx context.Context) {
 
 func (n *nightly) backup(ctx context.Context, cfg config.Config, app string) health.BackupRun {
 	run := health.BackupRun{Project: app, At: time.Now()}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Hour)
+	ctx, cancel := context.WithTimeout(ctx, 12*time.Hour)
 	defer cancel()
 	dir := BackupsDir(cfg, n.opt.User, n.opt.Dev)
 	stop := ""

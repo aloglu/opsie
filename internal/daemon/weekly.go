@@ -131,7 +131,7 @@ func Weekly(host string, now time.Time, snap metrics.Snapshot, results []health.
 			}
 			parts = append(parts, word)
 		}
-		add("Last night's backups: " + strings.Join(parts, ", ") + ".")
+		add("Latest backups: " + strings.Join(parts, ", ") + ".")
 	}
 	return m
 }

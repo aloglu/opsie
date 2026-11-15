@@ -21,6 +21,7 @@ import (
 	"github.com/aloglu/opsie/internal/audit"
 	"github.com/aloglu/opsie/internal/backup"
 	"github.com/aloglu/opsie/internal/config"
+	"github.com/aloglu/opsie/internal/facts"
 	"github.com/aloglu/opsie/internal/health"
 	"github.com/aloglu/opsie/internal/human"
 	"github.com/aloglu/opsie/internal/offsite"
@@ -352,7 +353,12 @@ func (m *Model) moveDone(msg moveDoneMsg) tea.Cmd {
 			kind = flashError
 		}
 	}
-	return tea.Batch(m.setFlash(msg.flash, kind, 8*time.Second), m.loadBackups(true), m.refresh())
+	// Everything is read again, and then the outcome is said, so it isn't
+	// replaced by the word that a check is running.
+	m.gathering = false
+	facts.Invalidate()
+	again := tea.Batch(m.loadBackups(true), m.gather(), m.tabPoll())
+	return tea.Batch(again, m.setFlash(msg.flash, kind, 8*time.Second))
 }
 
 // packAll backs up every app, copies each off the server, and sends

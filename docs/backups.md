@@ -10,12 +10,16 @@ Open a project and choose **Backups** to save the app into one file: its compose
 
 **Copies off the server.** A backup that lives only on the server is gone with the server. Set **Settings → Off-server copies** and every backup, nightly or by hand, is also copied:
 
-- over **SSH**, to `user@host:folder` (with `ssh_port`), using your own SSH key and known_hosts, so the other machine has to be one you've connected to before; or
+- over **SSH**, to `user@host:folder` (with `ssh_port`), using your own SSH key and known_hosts, so the other machine has to be one you've connected to before. The folder is an absolute path, or one inside that user's home (`backups/harbor` or `~/backups/harbor`); or
 - to **S3-compatible storage**: Cloudflare R2, Backblaze B2, AWS S3, Wasabi, or your own. For R2, the endpoint is `https://ACCOUNT_ID.r2.cloudflarestorage.com` and the region `auto`. Each upload is signed and goes over https.
 
 A backup that isn't encrypted is copied as it is, and the Backups screen says so.
 
 By default opsie never deletes anything off the server, so the copies there keep adding up: a full copy of every scheduled app, every time. If you pay for that space or are on a free plan, set **Keep off the server** (`keep_remote`) to how many copies of each app to keep. After a new copy arrives, opsie deletes the older ones there, over SSH or from the bucket. It only ever deletes files it put there itself, and never the newest ones you asked it to keep.
+
+Give each server a folder of its own, over SSH or as the bucket's `prefix`. Two servers that share one, and both have an app with the same name, would clear each other's copies of it.
+
+The S3 key only has to write to the bucket, which is safest: a stolen key then can't read or delete your backups. Keep off the server also needs it to list and delete, and fetching backups onto a new server needs it to list and read.
 
 **Restore** puts a backup back: the app stops, its folder and volumes are swapped for the backup's, and it starts again. Nothing is deleted: what was there is set aside next to it, and the Backups screen offers to delete it once you're happy. The backup is unpacked in full before anything is touched, so a damaged file or a wrong key changes nothing.
 

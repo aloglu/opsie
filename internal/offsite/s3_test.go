@@ -71,6 +71,7 @@ func TestPut(t *testing.T) {
 func TestValidSSH(t *testing.T) {
 	for s, want := range map[string]bool{
 		"backup@nas.example:/srv/backups/harbor": true, "me@10.0.0.2:backups": true,
+		"me@host:~/backups": true, "me@host:~": true, "me@host:/srv/~old": false, "me@host:~bob/x": false,
 		"-oProxyCommand=x@h:/p": false, "me@host:/srv/a;rm -rf /": false, "host:/srv": false, "me@host:/a b": false,
 	} {
 		if ValidSSH(s) != want {

@@ -150,7 +150,10 @@ func (s *State) Step(results []health.Result, now time.Time, n config.Notify) (m
 		if t.Missing < settle {
 			continue
 		}
-		if t.Told >= min && allowed(t.Told) {
+		if t.Told >= min {
+			if !allowed(t.Told) {
+				continue // said once the quiet hours are over
+			}
 			events = append(events, Event{At: now, ID: id, Title: t.Title, Status: health.OK, Kind: "recovered"})
 		}
 		delete(s.Tracks, id)

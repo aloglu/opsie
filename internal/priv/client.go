@@ -127,7 +127,9 @@ func (c *Client) Alive() bool {
 	}
 }
 
-// Call runs op with args and decodes its answer into out (which may be nil).
+// Call runs op with args and decodes its answer into out (which may be
+// nil). An operation that got part of the way says what it did as well
+// as what went wrong, so out can be filled in when there's an error too.
 func (c *Client) Call(ctx context.Context, op string, args map[string]string, out any) error {
 	id := c.next.Add(1)
 	ch := make(chan response, 1)
@@ -160,6 +162,9 @@ func (c *Client) Call(ctx context.Context, op string, args map[string]string, ou
 	select {
 	case r := <-ch:
 		if r.Err != "" {
+			if out != nil && len(r.Data) > 0 {
+				_ = json.Unmarshal(r.Data, out)
+			}
 			return errors.New(r.Err)
 		}
 		if out != nil && len(r.Data) > 0 {

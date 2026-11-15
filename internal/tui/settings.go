@@ -146,18 +146,18 @@ var settingGroups = []settingGroup{
 		{key: "backup.keep_remote", label: "Keep off the server", kind: "number:0:1000", integer: true,
 			help: "How many copies of each app's backups stay off the server. After a new copy arrives, opsie deletes the older ones there, over SSH or from the bucket, so the space they take stops growing. 0 keeps every copy and deletes nothing, which is how it has always been. Only files opsie put there are ever deleted."},
 		{key: "backup.ssh", label: "Copy over SSH to", kind: "sshdest", optional: true, placeholder: "backup@nas.example:/srv/backups/harbor",
-			help: "Each backup is also copied here with scp, using your SSH key: another server, or a computer at home. Connect to it once yourself first so its host key is known; opsie won't trust a host it hasn't seen. Old copies there aren't deleted."},
+			help: "Each backup is also copied here with scp, using your SSH key: another server, or a computer at home. Connect to it once yourself first so its host key is known; opsie won't trust a host it hasn't seen. Give each server a folder of its own. Old copies there stay unless Keep off the server is set."},
 		{key: "backup.ssh_port", label: "SSH port", kind: "number:1:65535", integer: true, optional: true, placeholder: "22",
 			help: "Only if the other machine's SSH isn't on port 22."},
 		{key: "backup.s3.endpoint", label: "S3 or R2 endpoint", kind: "url", optional: true, placeholder: "https://s3.eu-central-003.backblazeb2.com",
-			help: "Each backup is also uploaded to this S3-compatible storage: Backblaze B2, Cloudflare R2 (https://ACCOUNT.r2.cloudflarestorage.com), AWS, Wasabi or MinIO. Set an expiry rule on the bucket to delete old copies there."},
+			help: "Each backup is also uploaded to this S3-compatible storage: Backblaze B2, Cloudflare R2 (https://ACCOUNT.r2.cloudflarestorage.com), AWS, Wasabi or MinIO. Old copies stay there unless Keep off the server is set, or the bucket has an expiry rule."},
 		{key: "backup.s3.region", label: "S3 region", kind: "text", optional: true, placeholder: "us-east-1",
 			help: "The bucket's region, like eu-central-003 for B2, or auto for R2."},
 		{key: "backup.s3.bucket", label: "S3 bucket", kind: "text", optional: true, placeholder: "my-backups"},
 		{key: "backup.s3.prefix", label: "S3 folder", kind: "text", optional: true, placeholder: "harbor",
-			help: "A folder in the bucket for this server's backups."},
+			help: "A folder in the bucket for this server's backups. Give each server its own, so one never clears another's copies."},
 		{key: "backup.s3.key_id", label: "S3 key ID", kind: "text", optional: true,
-			help: "An access key that can write to the bucket. Give it only that: no reading or deleting, so a stolen key can't take your backups."},
+			help: "An access key that can write to the bucket. Writing alone is safest, since a stolen key then can't read or delete your backups. Keep off the server also needs it to list and delete, and fetching backups onto a new server needs it to list and read."},
 		{key: "backup.s3.secret", label: "S3 secret", kind: "text", secret: true, optional: true},
 	}},
 }
@@ -512,11 +512,7 @@ func (m *Model) saveSetting(f health.Fix) tea.Cmd {
 
 // splitList reads a list typed as "a, b c".
 func splitList(text string) []string {
-	out := []string{}
-	for _, f := range strings.FieldsFunc(text, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' }) {
-		out = append(out, f)
-	}
-	return out
+	return append([]string{}, strings.FieldsFunc(text, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' })...)
 }
 
 // lastAction says when opsie last changed something.

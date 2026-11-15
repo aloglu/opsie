@@ -24,6 +24,9 @@ func (Local) Alive() bool { return os.Geteuid() == 0 }
 func (Local) Call(ctx context.Context, op string, args map[string]string, out any) error {
 	resp := handle(request{Op: op, Args: args})
 	if resp.Err != "" {
+		if out != nil && resp.Data != nil {
+			_ = json.Unmarshal(resp.Data, out)
+		}
 		return errors.New(resp.Err)
 	}
 	if out != nil && resp.Data != nil {

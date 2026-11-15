@@ -21,9 +21,9 @@ import (
 	"github.com/aloglu/opsie/internal/update"
 )
 
-// fixTimeout is how long the dashboard waits for an action; the helper
-// has its own, shorter limits per operation.
-const fixTimeout = 35 * time.Minute
+// fixGrace is how much longer the dashboard waits for an action than the
+// helper gives it, so the helper's own answer is the one that's shown.
+const fixGrace = 5 * time.Minute
 
 // redact hides a pasted secret key: it goes to the helper, never into
 // the log.
@@ -149,7 +149,7 @@ func (m *Model) runFix(f health.Fix) tea.Cmd {
 	logged := redact(f.Args)
 	return func() tea.Msg {
 		_ = audit.Log(logPath, audit.Entry{Action: f.Op, Args: logged, Result: "requested"})
-		ctx, cancel := context.WithTimeout(context.Background(), fixTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), priv.Timeout(f.Op)+fixGrace)
 		defer cancel()
 		var out json.RawMessage
 		err := admin.Call(ctx, f.Op, f.Args, &out)
@@ -171,7 +171,12 @@ func (m *Model) fixDone(msg fixDoneMsg) tea.Cmd {
 			m.modal.stage = stageView
 			m.modal.err = msg.err.Error()
 		}
-		return m.setFlash("Failed: "+msg.err.Error(), flashError, 6*time.Second)
+		if strings.HasPrefix(msg.fix.Op, "backup.") {
+			// It may have got part of the way: look at the folder again.
+			m.bk = backupsState{}
+			m.forgetDisk()
+		}
+		return tea.Batch(m.setFlash("Failed: "+msg.err.Error(), flashError, 6*time.Second), m.loadBackups(true))
 	}
 	done := msg.fix.Done
 	switch msg.fix.Op {

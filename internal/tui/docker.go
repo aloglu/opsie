@@ -31,7 +31,6 @@ type dockerState struct {
 	dfAt time.Time
 	// unused are the images no container uses, as measured with df.
 	unused []priv.UnusedImage
-	err    string
 
 	busy bool
 	gen  int
@@ -105,8 +104,6 @@ func (m *Model) dockerUpdated(msg dockerMsg) tea.Cmd {
 	d.busy = false
 	if msg.listErr == nil {
 		m.facts.Containers, m.facts.DockerErr = msg.containers, ""
-	} else {
-		d.err = msg.listErr.Error()
 	}
 	if msg.statsErr == nil {
 		if d.stats == nil {
@@ -821,6 +818,9 @@ func (m *Model) pruneDetail(b *detailBuilder) detail {
 	}
 	for _, u := range m.dock.df {
 		label := map[string]string{"Images": "Images", "Containers": "Containers", "Local Volumes": "Volumes", "Build Cache": "Build cache"}[u.Type]
+		if label == "" {
+			label = u.Type
+		}
 		value := dockerSize(u.Size)
 		if u.Type != "Build Cache" {
 			value += t.dim.Render(fmt.Sprintf(" · %d, %d in use", u.Total, u.Active))

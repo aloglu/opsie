@@ -2,6 +2,7 @@ package priv
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/user"
 	"strconv"
@@ -230,5 +231,30 @@ func TestScheduledAndClock(t *testing.T) {
 		if ValidClock(in) != want {
 			t.Errorf("%q: %v", in, !want)
 		}
+	}
+}
+
+// Blocking a range that holds your own address would cut you off as
+// surely as blocking the address.
+func TestDenyRefusesYourOwnAddress(t *testing.T) {
+	for _, ip := range []string{"203.0.113.5", "203.0.113.0/24", "::ffff:203.0.113.5"} {
+		_, err := opUFWDeny(context.Background(), map[string]string{"ip": ip, "caller_ip": "203.0.113.5"})
+		if err == nil || !strings.Contains(err.Error(), "connected from") {
+			t.Errorf("%s: %v", ip, err)
+		}
+	}
+}
+
+// An operation that got part of the way says what it did along with
+// what went wrong.
+func TestAnswerComesWithAnError(t *testing.T) {
+	ops["test.partial"] = func(context.Context, map[string]string) (any, error) {
+		return BackupInfo{Path: "/b/a.tar.gz"}, errors.New("backed up, but the app didn't start again")
+	}
+	defer delete(ops, "test.partial")
+	var info BackupInfo
+	err := Local{}.Call(context.Background(), "test.partial", nil, &info)
+	if err == nil || info.Path != "/b/a.tar.gz" {
+		t.Fatalf("got %+v, %v", info, err)
 	}
 }

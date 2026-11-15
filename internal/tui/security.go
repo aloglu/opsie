@@ -337,13 +337,17 @@ func (m *Model) securityDetail(key string, b *detailBuilder) (detail, bool) {
 		if v == "yes" {
 			st = health.Warn
 		}
-		b.text(map[string]string{
+		about := map[string]string{
 			"yes":                  "Root can log in with a password. Root is the first username every bot tries.",
 			"prohibit-password":    "Root can log in, but only with a key.",
 			"without-password":     "Root can log in, but only with a key.",
 			"no":                   "Nobody can log in as root over SSH. Log in as yourself and use sudo.",
 			"forced-commands-only": "Root can only log in with a key that's limited to a set command.",
-		}[v], plain)
+		}[v]
+		if about == "" {
+			about = "sshd didn't say whether root can log in."
+		}
+		b.text(about, plain)
 		return detail{title: "Root login", headline: headline(t, st, rootWord(v), ""), body: b.body, fixes: health.RootFixes(f)}, true
 
 	case "sudo":

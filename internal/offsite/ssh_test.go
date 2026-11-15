@@ -61,3 +61,17 @@ func TestCopySSHExplainsHostKeys(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// A folder in home is asked for without the "~", which the quotes
+// around it would turn into a folder of that name.
+func TestCopySSHHome(t *testing.T) {
+	log := fakeSSH(t, "")
+	if err := Copy(context.Background(), config.Backup{SSH: "backup@nas.example:~/backups"}, []string{"/x/a.tar.gz"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(log)
+	calls := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(calls) != 2 || !strings.HasSuffix(calls[0], "mkdir -p -- 'backups'") || !strings.HasSuffix(calls[1], "/x/a.tar.gz backup@nas.example:backups/") {
+		t.Fatalf("calls %q", calls)
+	}
+}

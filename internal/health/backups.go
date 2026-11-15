@@ -112,7 +112,14 @@ func nightlyBackups(n Nightly, now time.Time) []Result {
 	if len(lines) > 0 {
 		r.Detail = append(r.Detail, strings.Join(lines, "; ")+".")
 	}
-	r.Detail = append(r.Detail, "They run every night at "+n.At+".")
+	often := "every night"
+	switch {
+	case n.Every == 7:
+		often = "once a week"
+	case n.Every > 1:
+		often = "every " + human.Plural(n.Every, "day", "days")
+	}
+	r.Detail = append(r.Detail, "They run "+often+" at "+n.At+".")
 	for _, app := range n.Apps {
 		r.Fixes = append(r.Fixes, Fix{Label: "Backups of " + app, Special: "backup:" + app})
 	}

@@ -11,11 +11,15 @@ import (
 	"time"
 )
 
-// opTimeout bounds an operation. Pulling and building images can take a
-// long time on a slow connection; everything else is quick.
-func opTimeout(op string) time.Duration {
+// Timeout bounds an operation. Backing up or restoring a big app takes
+// as long as copying it does, which can be hours. Pulling and building
+// images can take a long time on a slow connection; everything else is
+// quick.
+func Timeout(op string) time.Duration {
 	switch op {
-	case "compose.update", "compose.up", "backup.create", "backup.restore", "backup.verify", "backup.size", "apt.autoremove", "disk.usage", "apt.update", "apt.upgrade", "apt.auto-on", "fail2ban.install", "ufw.install":
+	case "backup.create", "backup.restore", "backup.verify":
+		return 12 * time.Hour
+	case "compose.update", "compose.up", "backup.size", "apt.autoremove", "disk.usage", "apt.update", "apt.upgrade", "apt.auto-on", "fail2ban.install", "ufw.install":
 		return 30 * time.Minute
 	}
 	return 3 * time.Minute
@@ -67,11 +71,16 @@ func handle(req request) (resp response) {
 		resp.Err = fmt.Sprintf("unknown operation %q", req.Op)
 		return resp
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), opTimeout(req.Op))
+	ctx, cancel := context.WithTimeout(context.Background(), Timeout(req.Op))
 	defer cancel()
 	data, err := op(ctx, req.Args)
 	if err != nil {
 		resp.Err = err.Error()
+		// What was done before it went wrong goes along, like the backup
+		// that was made when the app then didn't start again.
+		if raw, merr := json.Marshal(data); merr == nil && data != nil {
+			resp.Data = raw
+		}
 		return resp
 	}
 	if data != nil {

@@ -80,6 +80,10 @@ func (m *Model) duUpdated(msg duMsg) {
 	if msg.err != nil {
 		e.err = msg.err.Error()
 	}
+	if m.du == nil {
+		// Forgotten while this was being measured.
+		m.du = map[string]duEntry{}
+	}
 	m.du[msg.path] = e
 }
 
@@ -243,12 +247,15 @@ func (m *Model) cleanDetail(b *detailBuilder) detail {
 	} else {
 		b.kv("Unneeded", "no packages")
 	}
+	var docker uint64
 	for _, u := range m.dock.df {
-		if r := reclaimable(u); r != "" && u.Type != "Local Volumes" {
-			b.kv("Docker", r+t.dim.Render(" in unused images and build cache"))
-			fixes = append(fixes, health.Fix{Label: "Docker clean-up", Special: "open:prune"})
-			break
+		if u.Type == "Images" || u.Type == "Build Cache" {
+			docker += priv.ParseSize(strings.Fields(u.Reclaimable + " 0")[0])
 		}
+	}
+	if docker > 0 {
+		b.kv("Docker", human.Bytes(docker)+t.dim.Render(" in unused images and build cache"))
+		fixes = append(fixes, health.Fix{Label: "Docker clean-up", Special: "open:prune"})
 	}
 	if len(fixes) == 0 {
 		b.text("There's nothing worth removing right now. To see what takes up the space, look at what's using it.", t.subtle)

@@ -182,9 +182,7 @@ func (m *Model) historyCharts(kind string, b *detailBuilder) {
 				}
 			}
 			color := func(v float64) colorT { return l.color(v + base) }
-			for _, row := range t.plot(style, values, w, 3, top-base, color) {
-				b.body = append(b.body, row)
-			}
+			b.body = append(b.body, t.plot(style, values, w, 3, top-base, color)...)
 		}
 		left := span.axis + scale
 		pad := max(w-lipgloss.Width(left)-3, 1)

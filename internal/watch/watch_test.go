@@ -150,3 +150,29 @@ func TestCloneIsDeep(t *testing.T) {
 		t.Fatal("clone shares tracks")
 	}
 }
+
+// A warning that was sent, and whose item then goes away during quiet
+// hours, is still said to be fine once they're over.
+func TestGoneDuringQuietHoursRecoversAfter(t *testing.T) {
+	r := newRun()
+	r.n.QuietHours = "13:00-14:00"
+	r.step()
+	r.step(res("ports:web", health.Warn))
+	if m, _ := r.step(res("ports:web", health.Warn)); m == nil {
+		t.Fatal("the warning should have been sent")
+	}
+	r.t = time.Date(2026, 11, 10, 13, 0, 0, 0, time.UTC)
+	for range 3 {
+		if m, _ := r.step(); m != nil {
+			t.Fatalf("nothing is said in quiet hours: %v", m.Lines)
+		}
+	}
+	r.t = time.Date(2026, 11, 10, 14, 0, 0, 0, time.UTC)
+	m, ev := r.step()
+	if m == nil || len(ev) != 1 || ev[0].Kind != "recovered" || ev[0].ID != "ports:web" {
+		t.Fatalf("after quiet hours: %+v", ev)
+	}
+	if len(r.s.Tracks) != 0 {
+		t.Fatal("it should be forgotten once said")
+	}
+}

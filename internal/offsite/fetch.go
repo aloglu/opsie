@@ -230,14 +230,6 @@ func (s S3) Get(ctx context.Context, name, dest string) error {
 	return err
 }
 
-func sshParts(dest string) (host, dir string, err error) {
-	m := sshRe.FindStringSubmatch(dest)
-	if m == nil || strings.HasPrefix(dest, "-") {
-		return "", "", fmt.Errorf("%q isn't a destination like user@host:/folder", dest)
-	}
-	return m[1] + "@" + m[2], m[3], nil
-}
-
 func listSSH(ctx context.Context, dest string, port int, asUser string) ([]Remote, error) {
 	host, dir, err := sshParts(dest)
 	if err != nil {

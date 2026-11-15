@@ -2,7 +2,6 @@ package tui
 
 import (
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
 // A section is a card of selectable rows, the building block of the
@@ -191,8 +190,4 @@ func (m *Model) itemRow(left, right string, inner int) []string {
 // action is a row that does something rather than shows something.
 func (m *Model) action(label string, inner int) []string {
 	return []string{fit(m.th.navText.Render(label+" ›"), inner)}
-}
-
-func (m *Model) styled(c colorT, s string) string {
-	return lipgloss.NewStyle().Foreground(c).Render(s)
 }

@@ -28,15 +28,15 @@ every_days = 1          # days between those backups: 1 is every night, 7 once a
 at = "03:30"            # when
 stop = true             # stop each app while it's copied
 keep_remote = 0         # copies of each app kept off the server; 0 keeps them all
-ssh = ""                # copy backups to user@host:folder
+ssh = ""                # copy backups to user@host:folder, a folder of this server's own
 ssh_port = 22
 
 [backup.s3]             # or to S3-compatible storage
 endpoint = ""           # like "https://s3.eu-central-003.backblazeb2.com"
 region = ""             # "auto" for R2
 bucket = ""
-prefix = ""             # a folder in the bucket
-key_id = ""
+prefix = ""             # a folder in the bucket, this server's own
+key_id = ""             # a key that can write; keep_remote also needs list and delete
 secret = ""
 
 [docker]

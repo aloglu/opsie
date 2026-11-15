@@ -61,8 +61,7 @@ func (m *Model) procsUpdated(msg procsMsg) tea.Cmd {
 	m.syncLists()
 	p.gen++
 	gen := p.gen
-	every := time.Duration(m.env.Config.RefreshSeconds) * time.Second
-	return tea.Tick(every, func(time.Time) tea.Msg { return procsDueMsg(gen) })
+	return tea.Tick(m.refreshEvery(), func(time.Time) tea.Msg { return procsDueMsg(gen) })
 }
 
 // shownProcs is the list in display order: user processes only, busiest
@@ -140,10 +139,8 @@ func (m *Model) where(p metrics.Proc) string {
 	case p.Unit != "":
 		return strings.TrimSuffix(p.Unit, ".service")
 	case p.Container != "":
-		for _, c := range m.facts.Containers {
-			if strings.HasPrefix(c.ID, p.Container) || strings.HasPrefix(p.Container, c.ID) {
-				return c.Name
-			}
+		if name := m.containerFor(p); name != "" {
+			return name
 		}
 		return "container"
 	}

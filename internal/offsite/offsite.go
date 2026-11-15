@@ -18,7 +18,32 @@ import (
 var sshRe = regexp.MustCompile(`^([A-Za-z0-9._-]+)@([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\]):([A-Za-z0-9._/~-]+)$`)
 
 // ValidSSH reports whether s is a destination opsie can copy to.
-func ValidSSH(s string) bool { return sshRe.MatchString(s) && !strings.HasPrefix(s, "-") }
+func ValidSSH(s string) bool {
+	_, _, err := sshParts(s)
+	return err == nil
+}
+
+// sshParts takes a destination apart into who@where and the folder
+// there. The folder is given to the other side's shell in quotes, where
+// "~" wouldn't mean home, so "~/backups" becomes "backups": a folder
+// that doesn't start with "/" is already looked for in home. "~" anywhere
+// else isn't taken, since it would make a folder of that name.
+func sshParts(dest string) (host, dir string, err error) {
+	m := sshRe.FindStringSubmatch(dest)
+	if m == nil || strings.HasPrefix(dest, "-") {
+		return "", "", fmt.Errorf("%q isn't a destination like user@host:/folder", dest)
+	}
+	dir = m[3]
+	if dir == "~" || dir == "~/" {
+		dir = "."
+	} else if rest, ok := strings.CutPrefix(dir, "~/"); ok {
+		dir = rest
+	}
+	if strings.Contains(dir, "~") {
+		return "", "", fmt.Errorf("%q has a ~ that isn't at the start of the folder", dest)
+	}
+	return m[1] + "@" + m[2], dir, nil
+}
 
 // Configured reports whether copies have a place to go.
 func Configured(b config.Backup) bool {
@@ -90,11 +115,10 @@ func sshOptions(port int) []string {
 }
 
 func copySSH(ctx context.Context, dest string, port int, files []string, asUser string) error {
-	m := sshRe.FindStringSubmatch(dest)
-	if m == nil {
-		return fmt.Errorf("%q isn't a destination like user@host:/folder", dest)
+	host, dir, err := sshParts(dest)
+	if err != nil {
+		return err
 	}
-	host, dir := m[1]+"@"+m[2], m[3]
 	mk := asCaller(ctx, asUser, "ssh", append(sshOptions(port), "--", host, "mkdir -p -- '"+dir+"'")...)
 	if out, err := mk.CombinedOutput(); err != nil {
 		return fmt.Errorf("SSH to %s: %s", host, sshProblem(string(out), err))
