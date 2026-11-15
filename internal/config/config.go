@@ -37,13 +37,44 @@ type Config struct {
 	Backup     Backup     `toml:"backup"`
 	Docker     Docker     `toml:"docker"`
 	Agents     Agents     `toml:"agents"`
+	Charts     Charts     `toml:"charts"`
 
 	badTheme string
 	badAt    string
 }
 
 // Themes are the color schemes opsie has.
-var Themes = []string{"opsie", "terminal", "mono"}
+var Themes = []string{"opsie", "mono", "catppuccin", "cyberpunk", "dracula", "gruvbox", "nord", "ocean", "retro", "rose-pine", "tokyo-night"}
+
+// ChartStyles are the ways a chart can be drawn.
+var ChartStyles = []string{"bars", "braille", "line", "dense"}
+
+// ChartChoices are what one reading's chart can be: a style of its own,
+// or the same as the rest.
+var ChartChoices = append([]string{"same"}, ChartStyles...)
+
+// Charts is how the charts are drawn. Style is for all of them; a
+// reading with a style of its own uses that instead.
+type Charts struct {
+	Style   string `toml:"style"`
+	CPU     string `toml:"cpu"`
+	Memory  string `toml:"memory"`
+	Network string `toml:"network"`
+	Disk    string `toml:"disk"`
+}
+
+// For is the style of a reading's chart: "cpu", "memory", "network" or
+// "disk".
+func (c Charts) For(reading string) string {
+	own := map[string]string{"cpu": c.CPU, "memory": c.Memory, "network": c.Network, "disk": c.Disk}[reading]
+	if slices.Contains(ChartStyles, own) {
+		return own
+	}
+	if slices.Contains(ChartStyles, c.Style) {
+		return c.Style
+	}
+	return ChartStyles[0]
+}
 
 // Backgrounds are what Background can be.
 var Backgrounds = []string{"auto", "dark", "light"}
@@ -172,6 +203,13 @@ type Backup struct {
 	Nightly []string `toml:"nightly"`
 	At      string   `toml:"at"`
 	Stop    bool     `toml:"stop"`
+	// EveryDays is how many days apart those backups are: 1 is every
+	// night, 7 once a week.
+	EveryDays int `toml:"every_days"`
+	// KeepRemote is how many copies of each app's backups stay off the
+	// server; older ones are deleted there after a new one arrives. 0
+	// keeps them all.
+	KeepRemote int `toml:"keep_remote"`
 	// SSH copies each backup to another machine, like
 	// "backup@nas.example:/srv/backups/harbor", with your SSH key.
 	SSH     string `toml:"ssh"`
@@ -313,8 +351,9 @@ func Default() Config {
 		Agents:     Agents{Check: true, LowPercent: 10, LowBalance: 1},
 		Theme:      "opsie",
 		Background: "auto",
+		Charts:     Charts{Style: "bars", CPU: "same", Memory: "same", Network: "same", Disk: "same"},
 		AppsDir:    "~/apps",
-		Backup:     Backup{Keep: 5, At: "03:30", Stop: true},
+		Backup:     Backup{Keep: 5, At: "03:30", Stop: true, EveryDays: 1},
 	}
 }
 
@@ -360,11 +399,25 @@ func (c *Config) clamp() {
 	if !slices.Contains(Backgrounds, c.Background) {
 		c.Background = d.Background
 	}
+	if !slices.Contains(ChartStyles, c.Charts.Style) {
+		c.Charts.Style = d.Charts.Style
+	}
+	for _, own := range []*string{&c.Charts.CPU, &c.Charts.Memory, &c.Charts.Network, &c.Charts.Disk} {
+		if !slices.Contains(ChartChoices, *own) {
+			*own = "same"
+		}
+	}
 	if strings.TrimSpace(c.AppsDir) == "" {
 		c.AppsDir = d.AppsDir
 	}
 	if c.Backup.Keep < 1 || c.Backup.Keep > 100 {
 		c.Backup.Keep = d.Backup.Keep
+	}
+	if c.Backup.EveryDays < 1 || c.Backup.EveryDays > 30 {
+		c.Backup.EveryDays = d.Backup.EveryDays
+	}
+	if c.Backup.KeepRemote < 0 || c.Backup.KeepRemote > 1000 {
+		c.Backup.KeepRemote = 0
 	}
 	if _, err := time.Parse("15:04", c.Backup.At); err != nil {
 		c.badAt, c.Backup.At = c.Backup.At, d.Backup.At

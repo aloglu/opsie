@@ -1167,12 +1167,21 @@ func TestThemes(t *testing.T) {
 		}
 	}
 	contrast := func(a, b float64) float64 { return (max(a, b) + 0.05) / (min(a, b) + 0.05) }
-	for name := range palettes {
-		if name == "terminal" {
-			// Its colors are the terminal's, and what they are is up to
-			// the terminal's theme.
-			continue
-		}
+	// A scheme has fewer colors than opsie has parts, so these are the
+	// ones that must still be told apart in it: the selection from the
+	// tabs and from every chart, a reading whose color changes when it
+	// runs high from the colors it changes to, the two of a pair, and the
+	// statuses from each other.
+	apart := map[[2]string]bool{}
+	for _, pair := range [][2]string{
+		{"accent", "nav"}, {"accent", "cpu"}, {"accent", "mem"}, {"accent", "disk"}, {"accent", "wr"}, {"accent", "rx"}, {"accent", "tx"},
+		{"cpu", "warn"}, {"cpu", "danger"}, {"mem", "warn"}, {"mem", "danger"}, {"disk", "warn"}, {"disk", "danger"},
+		{"rx", "tx"}, {"disk", "wr"}, {"ok", "warn"}, {"ok", "danger"}, {"warn", "danger"},
+	} {
+		apart[pair] = true
+		apart[[2]string{pair[1], pair[0]}] = true
+	}
+	for name, p := range palettes {
 		for g, gname := range map[ground]string{groundDark: "dark", groundLight: "light", groundUnknown: "unknown"} {
 			th := themeNamed(name, g)
 			roles := map[string]colorT{
@@ -1188,7 +1197,10 @@ func TestThemes(t *testing.T) {
 				l := lum(ca)
 				onDark, onLight := contrast(l, 0.01), contrast(l, 1)
 				switch {
-				case g == groundDark && onDark < 4.5:
+				case g == groundDark && p.scheme && onDark < 3:
+					// A scheme's colors are shown as it has them.
+					t.Errorf("%s on %s: %s is %.1f:1 on a dark background", name, gname, a, onDark)
+				case g == groundDark && !p.scheme && onDark < 4.5:
 					t.Errorf("%s on %s: %s is %.1f:1 on a dark background", name, gname, a, onDark)
 				case g == groundLight && onLight < 3.6:
 					t.Errorf("%s on %s: %s is %.1f:1 on a light background", name, gname, a, onLight)
@@ -1205,7 +1217,7 @@ func TestThemes(t *testing.T) {
 					continue
 				}
 				for b, cb := range roles {
-					if a >= b || b == "grey" {
+					if a >= b || b == "grey" || (p.scheme && !apart[[2]string{a, b}]) {
 						continue
 					}
 					x, y := oklab(ca), oklab(cb)
@@ -1320,14 +1332,14 @@ func TestSettingsSaveToTheFile(t *testing.T) {
 
 	// A choice saves straight away and applies.
 	m.openItem(tabSettings, "set:theme")
-	var terminal health.Fix
+	var picked health.Fix
 	for _, f := range m.detailFor(m.modal.key, 40).fixes {
-		if f.Label == "terminal" {
-			terminal = f
+		if f.Label == "dracula" {
+			picked = f
 		}
 	}
-	m.chooseFix(terminal)
-	if m.th.name != "terminal" || m.env.Config.Theme != "terminal" {
+	m.chooseFix(picked)
+	if m.th.name != "dracula" || m.env.Config.Theme != "dracula" {
 		t.Fatalf("theme not applied: %s", m.th.name)
 	}
 
@@ -1361,7 +1373,7 @@ func TestSettingsSaveToTheFile(t *testing.T) {
 		t.Fatalf("check_seconds %d", m.env.Config.CheckSeconds)
 	}
 	data, _ := os.ReadFile(path)
-	for _, want := range []string{`theme = "terminal"`, "check_seconds = 60\n", `ntfy_url = "https://ntfy.sh/a-long-secret-topic"`} {
+	for _, want := range []string{`theme = "dracula"`, "check_seconds = 60\n", `ntfy_url = "https://ntfy.sh/a-long-secret-topic"`} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("file lacks %q:\n%s", want, data)
 		}

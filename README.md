@@ -20,14 +20,14 @@ More ways to install, and how to remove it, are in **[docs](docs/installing.md)*
 
 - **Health checklist:** problems first, each with what it means and a button to fix it: a failed service, an unhealthy container, a full disk, a pending restart, a site that stopped answering.
 - **Docker:** projects and containers with logs, a shell, restarts, image updates and clean-up of unused images.
-- **Backups:** Docker apps backed up by hand or every night, encrypted, verified, restored in one step, and copied off the server over SSH or to S3-compatible storage.
+- **Backups:** Docker apps backed up by hand or every night, encrypted, verified, restored in one step, and copied off the server over SSH or to S3-compatible storage. Moving to a new server is one screen on each side: back up everything, then restore everything.
 - **Services and processes:** restart a failed service, read its log, stop or slow down a runaway process.
 - **Storage:** every disk, what's using the space folder by folder, and what's safe to free.
 - **Network:** traffic charts, a speed test, and your Cloudflare Tunnel with every hostname it serves.
 - **Security and updates:** who can log in, what's exposed to the internet, the firewall, and pending updates.
 - **AI agents:** how much Claude Code and Codex have been used on the server, and what OpenRouter or DeepSeek keys have spent.
 - **Background checks:** an optional service that watches while you're away and alerts through ntfy, Telegram or a webhook.
-- **Phone and desktop:** the layout follows the screen, nothing needs Ctrl or Alt, and everything can be tapped. Three themes for dark or light terminals.
+- **Phone and desktop:** the layout follows the screen, nothing needs Ctrl or Alt, and everything can be tapped. Eleven themes, among them Dracula, Catppuccin, Nord, Gruvbox and Tokyo Night, and four ways to draw the charts.
 
 ## Documentation
 

@@ -61,6 +61,12 @@ func Copy(ctx context.Context, b config.Backup, files []string, asUser string) e
 	if len(errs) > 0 {
 		return fmt.Errorf("copying off the server failed: %s", strings.Join(errs, "; "))
 	}
+	// With the new copies there, the oldest make room, if a limit is set.
+	for _, f := range files {
+		if err := Prune(ctx, b, f, b.KeepRemote, asUser); err != nil {
+			return fmt.Errorf("copied, but the older copies off the server couldn't be cleared: %w", err)
+		}
+	}
 	return nil
 }
 

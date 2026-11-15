@@ -40,14 +40,25 @@ func ReadBackups(dir string) []health.BackupRun {
 	return s.Runs
 }
 
-// due reports whether the nightly backups should start now.
-func due(now time.Time, at, lastDay string) bool {
+// due reports whether the nightly backups should start now: it's their
+// time of day, and every days have gone by since the day they last ran.
+func due(now time.Time, at, lastDay string, every int) bool {
 	t, err := time.ParseInLocation("15:04", at, now.Location())
 	if err != nil {
 		return false
 	}
 	start := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, now.Location())
-	return lastDay != now.Format("2006-01-02") && !now.Before(start) && now.Sub(start) < window
+	if lastDay == now.Format("2006-01-02") || now.Before(start) || now.Sub(start) >= window {
+		return false
+	}
+	if last, err := time.ParseInLocation("2006-01-02", lastDay, now.Location()); err == nil && every > 1 {
+		today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		// Whole days, however long a day with a clock change in it is.
+		if int(today.Sub(last).Hours()/24+0.5) < every {
+			return false
+		}
+	}
+	return true
 }
 
 // BackupsDir is where backups go for account, by the settings.
@@ -91,7 +102,7 @@ func (n *nightly) loop(ctx context.Context) {
 			_ = json.Unmarshal(data, &s)
 		}
 		now := time.Now()
-		if !due(now, cfg.Backup.At, s.Day) {
+		if !due(now, cfg.Backup.At, s.Day, cfg.Backup.EveryDays) {
 			continue
 		}
 		s.Day = now.Format("2006-01-02")

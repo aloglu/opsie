@@ -185,7 +185,7 @@ func check(ctx context.Context, c *metrics.Collector, cfg config.Config, user st
 	f := facts.GatherFor(ctx, priv.Local{}, nil, user)
 	f.CheckOnline(ctx, cfg)
 	return health.Evaluate(health.Readings{Snap: snap, HaveSnap: true, Facts: f, HaveFacts: true, Thresholds: cfg.Thresholds, Sites: cfg.Sites, PublicPorts: cfg.Docker.PublicPorts,
-		Nightly: health.Nightly{Apps: cfg.Backup.Nightly, At: cfg.Backup.At, Runs: runs, Running: true}, HaveNightly: true, Spending: spend}), snap, f
+		Nightly: health.Nightly{Apps: cfg.Backup.Nightly, At: cfg.Backup.At, Every: cfg.Backup.EveryDays, Runs: runs, Running: true}, HaveNightly: true, Spending: spend}), snap, f
 }
 
 func loadState(path string) *watch.State {

@@ -100,13 +100,23 @@ func (m *Model) runFix(f health.Fix) tea.Cmd {
 		return m.refresh()
 	case strings.HasPrefix(f.Special, "backup:"):
 		m.modal = &modal{key: f.Special}
-		return m.loadBackups(false)
+		return tea.Batch(m.loadBackups(false), m.measureApp(strings.TrimPrefix(f.Special, "backup:")))
 	case strings.HasPrefix(f.Special, "backupfile:"):
 		m.modal = &modal{key: "bfile:" + strings.TrimPrefix(f.Special, "backupfile:")}
 		return m.loadBackups(false)
 	case strings.HasPrefix(f.Special, "backupcopy:"):
 		m.modal = nil
 		return tea.Batch(m.setFlash("Copying off the server…", flashOK, 4*time.Second), m.copyOff(strings.TrimPrefix(f.Special, "backupcopy:")))
+	case f.Special == "move:pack":
+		return m.packAll()
+	case f.Special == "move:restore":
+		return m.restoreAll(f.Args["identity"])
+	case f.Special == "move:settings":
+		return m.restoreSettings(f.Args["identity"])
+	case f.Special == "move:keepkey":
+		return m.keepKey()
+	case strings.HasPrefix(f.Special, "move:fetch:"):
+		return m.fetchBackups(strings.TrimPrefix(f.Special, "move:fetch:"))
 	case f.Special == "backupkey:new":
 		return m.newBackupKey()
 	case f.Special == "backupkey:remove":

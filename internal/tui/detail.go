@@ -191,6 +191,8 @@ func (m *Model) detailFor(key string, inner int) detail {
 		return m.backupFileDetail(strings.TrimPrefix(key, "bfile:"), b)
 	case key == "audit":
 		return m.auditDetail(b)
+	case key == "restoreall":
+		return m.restoreAllDetail(b)
 	case key == "backupkey":
 		return m.backupKeyDetail(b)
 	case strings.HasPrefix(key, "cron:"):
@@ -246,7 +248,9 @@ func (m *Model) modalOpened() tea.Cmd {
 		return m.loadDu(strings.TrimPrefix(k, "du:"))
 	case k == "clean" || strings.HasPrefix(k, "clean:"):
 		return m.loadClean()
-	case strings.HasPrefix(k, "backup:"), strings.HasPrefix(k, "bfile:"):
+	case strings.HasPrefix(k, "backup:"):
+		return tea.Batch(m.loadBackups(false), m.pollDocker(), m.measureApp(strings.TrimPrefix(k, "backup:")))
+	case strings.HasPrefix(k, "bfile:"), k == "restoreall", k == "set:restoreall", k == "set:packall":
 		return tea.Batch(m.loadBackups(false), m.pollDocker())
 	}
 	return nil
@@ -664,6 +668,9 @@ func (m *Model) modalBody(bg []string, w, h, top int) []string {
 			working = "Working… " + human.Duration(since)
 		}
 		text = append(text, "", t.subtle.Render(d.fix.Label+": "+working))
+		if step := m.moving().doing(); step != "" {
+			text = append(text, t.dim.Render(fit(step, inner)))
+		}
 	}
 
 	// Buttons go in a row when they fit, otherwise one per line.

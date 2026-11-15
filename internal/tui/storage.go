@@ -109,8 +109,12 @@ func (m *Model) rateCard(tab tabID, id string, ready bool, title string, c color
 			return s
 		}
 		s.badge = lipgloss.NewStyle().Foreground(c).Bold(true).Render(human.Rate(rate))
+		style := m.chartStyle("disk")
+		if tab == tabNetwork {
+			style = m.chartStyle("network")
+		}
 		peak := 0.0
-		for _, v := range past[max(len(past)-inner, 0):] {
+		for _, v := range past[max(len(past)-inner*perColumn(style), 0):] {
 			peak = max(peak, v)
 		}
 		// The peak stays where there isn't room for everything: it's what
@@ -128,7 +132,7 @@ func (m *Model) rateCard(tab tabID, id string, ready bool, title string, c color
 			// it goes on the line over the chart instead, on both of a pair.
 			line, s.badge = fit(s.badge, inner), ""
 		}
-		s.body = append([]string{line}, t.chart(past, inner, 4+m.grow+m.pad, max(peak, 1024), func(float64) colorT { return c })...)
+		s.body = append([]string{line}, t.plot(style, past, inner, 4+m.grow+m.pad, max(peak, 1024), func(float64) colorT { return c })...)
 		if ids, l := m.items(tab), &m.lists[tab]; l.sel < len(ids) && ids[l.sel] == id {
 			s.focused = true
 			s.focus = [2]int{0, len(s.body) + 1}

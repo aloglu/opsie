@@ -137,7 +137,7 @@ func (m *Model) tunnelSection(tn priv.Tunnel, inner int) section {
 				icon, right = t.statusIcon(health.Crit), t.dangerText.Render(name+" stopped")
 			}
 		}
-		if o, ok := m.originError(tn, r.Host); ok && o.Recent > 0 {
+		if o, ok := m.originError(tn, r.Host); ok && health.OriginDown(o, m.facts.Sites) {
 			icon, right = t.statusIcon(health.Warn), t.warnText.Render("down")
 		}
 		if site, ok := m.site("https://" + r.Host + r.Path); ok {
@@ -214,7 +214,7 @@ func (m *Model) tunnelDetail(name string, b *detailBuilder) detail {
 		b.text("Short drops are normal: cloudflared keeps several connections and reconnects on its own.", t.subtle)
 	}
 	for _, o := range tn.Origins {
-		if o.Recent > 0 {
+		if health.OriginDown(o, m.facts.Sites) {
 			b.text(o.Host+": "+o.Error+".", t.warnText)
 		}
 	}
@@ -288,7 +288,7 @@ func (m *Model) routeDetail(id string, b *detailBuilder) detail {
 		when := human.Duration(m.now.Sub(o.Last)) + " ago"
 		b.kv("Failed", fmt.Sprintf("%s in 24h · last %s", human.Plural(o.Count, "request", "requests"), when))
 		style := t.subtle
-		if o.Recent > 0 {
+		if health.OriginDown(o, m.facts.Sites) {
 			style = t.warnText
 			if st == health.OK {
 				st, word = health.Warn, "down"

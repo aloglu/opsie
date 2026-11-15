@@ -15,7 +15,7 @@ import (
 // long time on a slow connection; everything else is quick.
 func opTimeout(op string) time.Duration {
 	switch op {
-	case "compose.update", "compose.up", "backup.create", "backup.restore", "backup.verify", "apt.autoremove", "disk.usage", "apt.update", "apt.upgrade", "apt.auto-on", "fail2ban.install", "ufw.install":
+	case "compose.update", "compose.up", "backup.create", "backup.restore", "backup.verify", "backup.size", "apt.autoremove", "disk.usage", "apt.update", "apt.upgrade", "apt.auto-on", "fail2ban.install", "ufw.install":
 		return 30 * time.Minute
 	}
 	return 3 * time.Minute

@@ -57,6 +57,7 @@ var (
 
 	lookRound  = look{"╭", "╮", "╰", "╯", "─", "│", "━", "─", blockBars}
 	lookSquare = look{"┌", "┐", "└", "┘", "─", "│", "█", "░", blockBars}
+	lookDouble = look{"╔", "╗", "╚", "╝", "═", "║", "▰", "▱", blockBars}
 )
 
 // ground is what the colors are drawn on: a dark terminal, a light one, or
@@ -95,8 +96,9 @@ var tones = map[ground]tone{
 // a hue on the OKLCH color wheel, with how light and how strong they are
 // next to the others: colors that all have one lightness and one
 // strength look made by a machine, so the ones that lead are lifted and
-// the ones that only inform are quiet. The rest are the terminal's own:
-// its text color, a grey, or one of its sixteen colors.
+// the ones that only inform are quiet. Some are a color scheme's own
+// color, given exactly. The rest are the terminal's own text color, or a
+// grey.
 type ink struct {
 	kind inkKind
 	// h is the hue, in degrees; up how much lighter than the tone it is,
@@ -104,8 +106,10 @@ type ink struct {
 	h, up, c float64
 	// quiet is the second of two shades of one hue.
 	quiet bool
-	// n is which of the terminal's sixteen colors.
-	n int
+	// hex is a scheme's color as it's written, and l and chroma what it
+	// is in OKLCH, along with h.
+	hex       string
+	l, chroma float64
 }
 
 type inkKind int
@@ -116,9 +120,10 @@ const (
 	inkBare
 	// inkGrey is the theme's grey.
 	inkGrey
-	// inkANSI is one of the terminal's sixteen colors, whatever its theme
-	// makes of it.
-	inkANSI
+	// inkExact is a color scheme's own color. It's shown as it is on a
+	// dark terminal, which is what the schemes are made for, and moved
+	// to where it reads on any other.
+	inkExact
 )
 
 func hue(h float64) ink { return ink{h: h, c: 1} }
@@ -133,7 +138,11 @@ func (i ink) strength(c float64) ink { i.c = c; return i }
 // soft is the quieter shade of an ink, for the second of a pair.
 func (i ink) soft() ink { i.quiet = true; i.c *= 0.8; return i }
 
-func ansi16(n int) ink { return ink{kind: inkANSI, n: n} }
+// exact is a color scheme's own color, written as #rrggbb.
+func exact(hex string) ink {
+	l, c, h := toOKLCH(hex)
+	return ink{kind: inkExact, hex: hex, l: l, chroma: c, h: h, c: 1}
+}
 
 var (
 	bare = ink{kind: inkBare}
@@ -151,21 +160,14 @@ type palette struct {
 	// are read (disk) and written (wr).
 	cpu, mem, disk, wr, rx, tx ink
 	ok, info, warn, danger     ink
-	// tint is the hue of the greys, or -1 for none.
-	tint float64
-	look look
+	// tint is the hue of the greys, or -1 for none, and tintC how strong
+	// it is when that's more than a trace.
+	tint, tintC float64
+	look        look
+	// scheme palettes are someone else's colors, and there are fewer of
+	// them than opsie has parts, so some parts share one.
+	scheme bool
 }
-
-// The terminal's sixteen colors, by their usual names.
-const (
-	ansiRed = 1 + iota
-	ansiGreen
-	ansiYellow
-	ansiBlue
-	ansiMagenta
-	ansiCyan
-	ansiBright = 8
-)
 
 var palettes = map[string]palette{
 	// A city at night: blue, violet and cyan lead, pink, teal and orange
@@ -181,20 +183,6 @@ var palettes = map[string]palette{
 		warn: hue(92).lift(0.12), danger: hue(22),
 		tint: 265, look: lookRound,
 	},
-	// The terminal's own sixteen colors, so opsie looks like the rest of
-	// what's in it. There are only six hues among them, so the readings
-	// borrow from the statuses, and the selection is the terminal's
-	// colors swapped. Square.
-	"terminal": {
-		accent: bare, accent2: bare,
-		nav: ansi16(ansiBright + ansiMagenta),
-		cpu: ansi16(ansiCyan), mem: ansi16(ansiMagenta),
-		disk: ansi16(ansiBright + ansiGreen), wr: ansi16(ansiGreen),
-		rx: ansi16(ansiBright + ansiBlue), tx: ansi16(ansiBlue),
-		ok: ansi16(ansiGreen), info: ansi16(ansiBlue),
-		warn: ansi16(ansiYellow), danger: ansi16(ansiRed),
-		tint: -1, look: lookSquare,
-	},
 	// No color but the statuses, and those quiet: everything else is the
 	// terminal's own text. Out and written are the readings that can't be
 	// told from their pair by place, so they're grey next to the other's
@@ -205,6 +193,87 @@ var palettes = map[string]palette{
 		ok: hue(150).strength(0.5), info: hue(245).strength(0.5),
 		warn: hue(85).lift(0.06).strength(0.5), danger: hue(25).strength(0.5),
 		tint: -1, look: lookSquare,
+	},
+
+	// The color schemes below are other people's, each with the shapes
+	// its look asks for. Their colors are as the schemes have them, in
+	// opsie's parts: the selection never shares a color with a chart, and
+	// a reading whose color changes when it runs high never shares one
+	// with a warning. The network, whose color never changes, does where
+	// a scheme runs out of hues.
+	"catppuccin": {
+		accent: exact("#cba6f7"), accent2: exact("#f5c2e7"), nav: exact("#89dceb"),
+		cpu: exact("#89b4fa"), mem: exact("#fab387"),
+		disk: exact("#94e2d5"), wr: exact("#94e2d5").soft(),
+		rx: exact("#f5c2e7"), tx: exact("#f5c2e7").soft(),
+		ok: exact("#a6e3a1"), info: exact("#9399b2"), warn: exact("#f9e2af"), danger: exact("#f38ba8"),
+		tint: 267, look: lookRound, scheme: true,
+	},
+	"cyberpunk": {
+		accent: exact("#00ffff"), accent2: exact("#ff00ff"), nav: exact("#ff00ff"),
+		cpu: exact("#ffff00"), mem: exact("#ff00ff"),
+		disk: exact("#00ff88"), wr: exact("#00ff88").soft(),
+		rx: exact("#ffaa00"), tx: exact("#ffaa00").soft(),
+		ok: exact("#00ff88"), info: grey, warn: exact("#ffaa00"), danger: exact("#ff0044"),
+		tint: 285, tintC: 0.05, look: lookDouble, scheme: true,
+	},
+	"dracula": {
+		accent: exact("#bd93f9"), accent2: exact("#ff79c6"), nav: exact("#ff79c6"),
+		cpu: exact("#8be9fd"), mem: exact("#ffb86c"),
+		disk: exact("#50fa7b"), wr: exact("#50fa7b").soft(),
+		rx: exact("#f1fa8c"), tx: exact("#f1fa8c").soft(),
+		ok: exact("#50fa7b"), info: exact("#6272a4"), warn: exact("#f1fa8c"), danger: exact("#ff5555"),
+		tint: 265, tintC: 0.04, look: lookRound, scheme: true,
+	},
+	"gruvbox": {
+		accent: exact("#fe8019"), accent2: exact("#fabd2f"), nav: exact("#d3869b"),
+		cpu: exact("#83a598"), mem: exact("#8ec07c"),
+		disk: exact("#b8bb26"), wr: exact("#b8bb26").soft(),
+		rx: exact("#fabd2f"), tx: exact("#fabd2f").soft(),
+		ok: exact("#b8bb26"), info: exact("#928374"), warn: exact("#fabd2f"), danger: exact("#fb4934"),
+		tint: 70, tintC: 0.03, look: lookSquare, scheme: true,
+	},
+	"nord": {
+		accent: exact("#88c0d0"), accent2: exact("#5e81ac"), nav: exact("#b48ead"),
+		cpu: exact("#81a1c1"), mem: exact("#d08770"),
+		disk: exact("#a3be8c"), wr: exact("#a3be8c").soft(),
+		rx: exact("#ebcb8b"), tx: exact("#ebcb8b").soft(),
+		ok: exact("#a3be8c"), info: exact("#5e81ac"), warn: exact("#ebcb8b"), danger: exact("#bf616a"),
+		tint: 255, tintC: 0.03, look: lookSquare, scheme: true,
+	},
+	"ocean": {
+		accent: exact("#55efc4"), accent2: exact("#48dbfb"), nav: exact("#48dbfb"),
+		cpu: exact("#0abde3"), mem: exact("#c8d6e5"),
+		disk: exact("#00d2d3"), wr: exact("#00d2d3").soft(),
+		rx: exact("#feca57"), tx: exact("#feca57").soft(),
+		ok: exact("#00d2d3"), info: exact("#8395a7"), warn: exact("#feca57"), danger: exact("#ff6b6b"),
+		tint: 240, tintC: 0.04, look: lookRound, scheme: true,
+	},
+	// An amber screen, so the selection is what it was on one: the text
+	// and the background swapped.
+	"retro": {
+		accent: bare, accent2: bare, nav: exact("#ffcc00"),
+		cpu: exact("#ffb000"), mem: exact("#cc8800"),
+		disk: exact("#33ff00"), wr: exact("#33ff00").soft(),
+		rx: exact("#ff6600"), tx: exact("#ff6600").soft(),
+		ok: exact("#33ff00"), info: grey, warn: exact("#ff6600"), danger: exact("#ff0033"),
+		tint: 85, tintC: 0.08, look: lookDouble, scheme: true,
+	},
+	"rose-pine": {
+		accent: exact("#ebbcba"), accent2: exact("#c4a7e7"), nav: exact("#c4a7e7"),
+		cpu: exact("#9ccfd8"), mem: exact("#c4a7e7"),
+		disk: exact("#31748f"), wr: exact("#31748f").soft(),
+		rx: exact("#f6c177"), tx: exact("#f6c177").soft(),
+		ok: exact("#31748f"), info: exact("#908caa"), warn: exact("#f6c177"), danger: exact("#eb6f92"),
+		tint: 290, tintC: 0.03, look: lookRound, scheme: true,
+	},
+	"tokyo-night": {
+		accent: exact("#7aa2f7"), accent2: exact("#bb9af7"), nav: exact("#bb9af7"),
+		cpu: exact("#7dcfff"), mem: exact("#ff9e64"),
+		disk: exact("#73daca"), wr: exact("#73daca").soft(),
+		rx: exact("#e0af68"), tx: exact("#e0af68").soft(),
+		ok: exact("#9ece6a"), info: exact("#737aa2"), warn: exact("#e0af68"), danger: exact("#f7768e"),
+		tint: 265, tintC: 0.04, look: lookRound, scheme: true,
 	},
 }
 
@@ -222,7 +291,7 @@ func themeNamed(name string, g ground) theme {
 		if p.tint < 0 {
 			return lipgloss.Color(oklch(l, 0, 0))
 		}
-		return lipgloss.Color(oklch(l, 0.02, p.tint))
+		return lipgloss.Color(oklch(l, max(p.tintC, 0.02), p.tint))
 	}
 	muted := shade(tn.grey)
 	col := func(i ink) color.Color {
@@ -231,8 +300,8 @@ func themeNamed(name string, g ground) theme {
 			return lipgloss.NoColor{}
 		case inkGrey:
 			return muted
-		case inkANSI:
-			return lipgloss.ANSIColor(i.n)
+		case inkExact:
+			return lipgloss.Color(i.on(g, tn))
 		}
 		l := tn.l + i.up*tn.lift
 		if i.quiet {
@@ -278,13 +347,7 @@ func themeNamed(name string, g ground) theme {
 	t.backdrop = fg(t.border).Faint(true)
 	on := lipgloss.Color(tn.ink)
 	t.button = lipgloss.NewStyle().Foreground(on).Background(t.muted).Padding(0, 1)
-	if p.danger.kind == inkANSI {
-		// What reads on one of the terminal's colors is up to its theme;
-		// its own background always does.
-		t.buttonDanger = fg(t.danger).Reverse(true).Bold(true).Padding(0, 1)
-	} else {
-		t.buttonDanger = lipgloss.NewStyle().Foreground(on).Background(t.danger).Bold(true).Padding(0, 1)
-	}
+	t.buttonDanger = lipgloss.NewStyle().Foreground(on).Background(t.danger).Bold(true).Padding(0, 1)
 	if p.accent.kind == inkBare {
 		// The terminal's own colors, swapped.
 		t.buttonFocus = lipgloss.NewStyle().Reverse(true).Bold(true).Padding(0, 1)
@@ -294,6 +357,70 @@ func themeNamed(name string, g ground) theme {
 		t.selected = lipgloss.NewStyle().Foreground(on).Background(t.accent)
 	}
 	return t
+}
+
+// on is a scheme's color on a ground. On a dark one it's the color as
+// the scheme has it. The schemes are all made for dark backgrounds, so on
+// any other the color keeps its hue and is moved to where the ground's
+// tone says colors read, the lighter ones staying the lighter ones.
+func (i ink) on(g ground, tn tone) string {
+	l, c := i.l, i.chroma
+	if g != groundDark {
+		const from, to = 0.50, 0.95
+		l = tn.lo + (min(max(l, from), to)-from)/(to-from)*(tn.hi-tn.lo)
+		if c > 0.04 {
+			// A pastel that's made deep goes muddy without more color.
+			c = max(c, 0.11)
+		}
+	} else if !i.quiet {
+		return i.hex
+	}
+	if i.quiet {
+		// The quieter shade goes towards the ground, unless the color is
+		// already as near to it as reads.
+		lo, hi := tn.lo, tn.hi
+		if g == groundDark {
+			lo, hi = 0.50, 0.95
+		}
+		was := l
+		if l+tn.soft < lo || l+tn.soft > hi {
+			l -= tn.soft
+		} else {
+			l += tn.soft
+		}
+		l = min(max(l, lo), hi)
+		if math.Abs(l-was) < 0.08 {
+			// No room to be lighter or darker, so it's weaker instead.
+			c *= 0.5
+		}
+	}
+	return oklch(l, c*i.c, i.h)
+}
+
+// toOKLCH is the lightness, chroma and hue of an sRGB color written as
+// #rrggbb.
+func toOKLCH(hex string) (l, c, h float64) {
+	var r8, g8, b8 int
+	fmt.Sscanf(hex, "#%02x%02x%02x", &r8, &g8, &b8)
+	lin := func(v int) float64 {
+		x := float64(v) / 255
+		if x <= 0.04045 {
+			return x / 12.92
+		}
+		return math.Pow((x+0.055)/1.055, 2.4)
+	}
+	r, g, b := lin(r8), lin(g8), lin(b8)
+	l_ := math.Cbrt(0.4122214708*r + 0.5363325363*g + 0.0514459929*b)
+	m_ := math.Cbrt(0.2119034982*r + 0.6806995451*g + 0.1073969566*b)
+	s_ := math.Cbrt(0.0883024619*r + 0.2817188376*g + 0.6299787005*b)
+	l = 0.2104542553*l_ + 0.7936177850*m_ - 0.0040720468*s_
+	a := 1.9779984951*l_ - 2.4285922050*m_ + 0.4505937099*s_
+	bb := 0.0259040371*l_ + 0.7827717662*m_ - 0.8086757660*s_
+	h = math.Atan2(bb, a) * 180 / math.Pi
+	if h < 0 {
+		h += 360
+	}
+	return l, math.Hypot(a, bb), h
 }
 
 // oklch is the sRGB color, as #rrggbb, of a lightness (0–1), a chroma

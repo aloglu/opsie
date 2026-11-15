@@ -42,9 +42,21 @@ type settingGroup struct {
 var settingGroups = []settingGroup{
 	{"Look", []setting{
 		{key: "theme", label: "Theme", kind: "choice", options: config.Themes,
-			help: "opsie's look. Each theme has its own colors and its own shapes: opsie's own, blue and violet on rounded cards (opsie), your terminal's sixteen colors in square boxes (terminal), or no color but the statuses (mono). Text and the background are always your terminal's own."},
+			help: "opsie's look. Each theme has its own colors and its own shapes: opsie's own, blue and violet on rounded cards (opsie), no color but the statuses (mono), or one of nine well-known color schemes. The schemes are made for dark terminals; on a light one their colors are deepened so they still read. `opsie themes` shows them all. Text and the background are always your terminal's own."},
 		{key: "background", label: "Background", kind: "choice", options: config.Backgrounds,
 			help: "Colors are mixed for the terminal's background: light and clear on a dark one, deep on a light one. auto asks the terminal which it has; if yours doesn't answer and the colors look washed out, say dark or light here."},
+	}},
+	{"Charts", []setting{
+		{key: "charts.style", label: "Chart style", kind: "choice", options: config.ChartStyles,
+			help: "How the charts are drawn: solid bars (bars), a fine dotted line (braille), a drawn line (line), or bars at twice the detail, two readings to a column (dense). A chart one row tall is always bars."},
+		{key: "charts.cpu", label: "CPU chart", kind: "choice", options: config.ChartChoices,
+			help: "The CPU chart's own style, or the same as the rest."},
+		{key: "charts.memory", label: "Memory chart", kind: "choice", options: config.ChartChoices,
+			help: "The memory and swap charts' own style, or the same as the rest."},
+		{key: "charts.network", label: "Network chart", kind: "choice", options: config.ChartChoices,
+			help: "The network charts' own style, or the same as the rest."},
+		{key: "charts.disk", label: "Disk chart", kind: "choice", options: config.ChartChoices,
+			help: "The style of the charts of what the disks read and write and how full they are, or the same as the rest."},
 	}},
 	{"Alerts", []setting{
 		{key: "notify.ntfy_url", label: "ntfy topic", kind: "url", optional: true, placeholder: "https://ntfy.sh/a-long-secret-name",
@@ -120,15 +132,19 @@ var settingGroups = []settingGroup{
 			help: "Where app backups are saved: a folder in your home, or under /mnt, /media, /srv or /var/backups, like another disk. Backups belong to you, so you can copy them off the server. ~ is your home."},
 		{key: "backup.keep", label: "Keep", kind: "number:1:100", integer: true,
 			help: "How many backups of each app are kept. Making one more deletes the oldest."},
-		{key: "backup.nightly", label: "Every night", kind: "list", optional: true, placeholder: "sync, wiki",
-			help: "Apps the background checks back up every night, by project name, separated by commas. Each app's Backups screen can switch it on too."},
-		{key: "backup.at", label: "Nightly at", kind: "clock",
-			help: "When the nightly backups run, in the server's time. If the server is off then, they still run if it's back within two hours."},
+		{key: "backup.nightly", label: "Scheduled apps", kind: "list", optional: true, placeholder: "sync, wiki",
+			help: "Apps the background checks back up on their own, by project name, separated by commas. Each app's Backups screen can switch it on too. With none listed, nothing is backed up unless you do it yourself with Back up now."},
+		{key: "backup.every_days", label: "Days between", kind: "number:1:30", integer: true,
+			help: "Days between scheduled backups: 1 is every night, 7 once a week. Fewer backups means less space taken, here and off the server."},
+		{key: "backup.at", label: "Scheduled at", kind: "clock",
+			help: "When the scheduled backups run, in the server's time. If the server is off then, they still run if it's back within two hours."},
 		{key: "backup.stop", label: "Stop apps while copying", kind: "choice", options: []string{"on", "off"}, boolean: true,
-			help: "Nightly backups stop each app for the moment it's copied, so databases are saved whole. Turn it off only for apps that can't have any downtime."},
+			help: "Scheduled backups stop each app for the moment it's copied, so databases are saved whole. Turn it off only for apps that can't have any downtime."},
 		{key: "backup.encrypt_to", label: "Encryption key", kind: "agepub", optional: true, hidden: true},
 	}},
 	{"Off-server copies", []setting{
+		{key: "backup.keep_remote", label: "Keep off the server", kind: "number:0:1000", integer: true,
+			help: "How many copies of each app's backups stay off the server. After a new copy arrives, opsie deletes the older ones there, over SSH or from the bucket, so the space they take stops growing. 0 keeps every copy and deletes nothing, which is how it has always been. Only files opsie put there are ever deleted."},
 		{key: "backup.ssh", label: "Copy over SSH to", kind: "sshdest", optional: true, placeholder: "backup@nas.example:/srv/backups/harbor",
 			help: "Each backup is also copied here with scp, using your SSH key: another server, or a computer at home. Connect to it once yourself first so its host key is known; opsie won't trust a host it hasn't seen. Old copies there aren't deleted."},
 		{key: "backup.ssh_port", label: "SSH port", kind: "number:1:65535", integer: true, optional: true, placeholder: "22",
@@ -276,6 +292,8 @@ func (m *Model) settingsSections(inner int) []section {
 		}
 		if g.title == "Backups" {
 			sec.entries = append(sec.entries, entry{id: "set:encryption", lines: m.itemRow("Encryption", t.subtle.Render(m.encryptionWord()), inner)})
+			sec.entries = append(sec.entries, entry{id: "set:packall", lines: m.action("Back up everything", inner)})
+			sec.entries = append(sec.entries, entry{id: "set:restoreall", lines: m.action("Restore from backups", inner)})
 		}
 		if g.title == "Alerts" && len(m.env.Config.Problems()) > 0 {
 			sec.outro = wrap(t.warnText.Render(strings.Join(m.env.Config.Problems(), "; ")+"."), inner)
@@ -328,6 +346,10 @@ func (m *Model) settingDetail(key string, b *detailBuilder) detail {
 		return detail{title: "Test alert", body: b.body, fixes: []health.Fix{{Label: "Send a test alert", Special: "notify:test"}}}
 	case "encryption":
 		return m.encryptionDetail(b)
+	case "packall":
+		return m.packAllDetail(b)
+	case "restoreall":
+		return m.restoreAllDetail(b)
 	case "weekly-now":
 		b.text("Sends the weekly summary to "+strings.Join(health.Targets(m.env.Config.Notify), " and ")+" now, so you can see what it looks like. It's built from what the background checks recorded.", plain)
 		return detail{title: "Weekly summary", body: b.body, fixes: []health.Fix{{Label: "Send it now", Special: "notify:weekly"}}}

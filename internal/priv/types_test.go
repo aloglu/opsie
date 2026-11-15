@@ -2,6 +2,7 @@ package priv
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -155,5 +156,20 @@ func TestParseUnused(t *testing.T) {
 	}
 	if ParseUnused("not json") != nil {
 		t.Fatal("junk should give nothing")
+	}
+}
+
+func TestRestoreTarget(t *testing.T) {
+	here := t.TempDir()
+	apps := filepath.Join(t.TempDir(), "apps")
+	for _, c := range []struct{ folder, apps, want string }{
+		{filepath.Join(here, "wiki"), apps, filepath.Join(here, "wiki")},                           // where it was, when that's here
+		{"/home/nobody-by-this-name/apps/wiki", apps, filepath.Join(apps, "wiki")},                 // another server's home
+		{"/home/nobody-by-this-name/apps/wiki", "", "/home/nobody-by-this-name/apps/wiki"},         // an ordinary restore
+		{"/home/nobody-by-this-name/apps/wiki", "relative", "/home/nobody-by-this-name/apps/wiki"}, // not a folder to trust
+	} {
+		if got := restoreTarget(c.folder, c.apps); got != c.want {
+			t.Errorf("restoreTarget(%q, %q) = %q, want %q", c.folder, c.apps, got, c.want)
+		}
 	}
 }

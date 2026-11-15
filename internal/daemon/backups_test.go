@@ -24,8 +24,14 @@ func TestNightlyIsDue(t *testing.T) {
 		{at(5, 30), "2026-11-09", false}, // too late: don't stop apps midday
 		{at(3, 45), "2026-11-10", false}, // already ran today
 	} {
-		if got := due(c.now, "03:30", c.last); got != c.want {
+		if got := due(c.now, "03:30", c.last, 1); got != c.want {
 			t.Errorf("%v last %q: got %v", c.now, c.last, got)
+		}
+	}
+	// Once a week: not until seven days have gone by, then at its time.
+	for last, want := range map[string]bool{"2026-11-09": false, "2026-11-04": false, "2026-11-03": true, "2026-10-20": true, "": true} {
+		if got := due(at(3, 30), "03:30", last, 7); got != want {
+			t.Errorf("weekly, last %q: got %v", last, got)
 		}
 	}
 }

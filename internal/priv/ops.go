@@ -34,6 +34,7 @@ var ops = map[string]func(ctx context.Context, args map[string]string) (any, err
 	"docker.logdefault": opLogDefault,
 	"backup.list":       opBackupList,
 	"backup.verify":     opBackupVerify,
+	"backup.size":       opBackupSize,
 	"docker.preflight":  opPreflight,
 	"ssh.keys":          opKeys,
 	"ssh.sessionkey":    opSessionKey,

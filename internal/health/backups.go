@@ -28,7 +28,9 @@ type BackupRun struct {
 type Nightly struct {
 	Apps []string
 	At   string
-	Runs []BackupRun
+	// Every is how many days apart they are; 0 and 1 are every night.
+	Every int
+	Runs  []BackupRun
 	// Running is whether the background service is there to do it.
 	Running bool
 }
@@ -46,11 +48,11 @@ func nightlyBackups(n Nightly, now time.Time) []Result {
 	if len(n.Apps) == 0 {
 		return nil
 	}
-	r := Result{ID: "backups", Title: "Nightly backups", Status: OK}
+	r := Result{ID: "backups", Title: "Scheduled backups", Status: OK}
 	fix := Fix{Label: "Background checks", Special: "open:settings:result:watcher"}
 	if !n.Running {
 		r.Status, r.Summary = Warn, "not running"
-		r.Detail = []string{"Nightly backups of " + strings.Join(n.Apps, ", ") + " are run by the background checks, which aren't running, so none are being made."}
+		r.Detail = []string{"Scheduled backups of " + strings.Join(n.Apps, ", ") + " are run by the background checks, which aren't running, so none are being made."}
 		r.Fixes = []Fix{fix}
 		return []Result{r}
 	}
@@ -62,7 +64,7 @@ func nightlyBackups(n Nightly, now time.Time) []Result {
 			never = append(never, app)
 		case !run.OK:
 			failed = append(failed, app+" ("+run.Err+")")
-		case now.Sub(run.At) > 30*time.Hour:
+		case now.Sub(run.At) > time.Duration(max(n.Every, 1)*24+6)*time.Hour:
 			stale = append(stale, app+" ("+human.Duration(now.Sub(run.At))+" ago)")
 		default:
 			good = append(good, app)
@@ -74,16 +76,20 @@ func nightlyBackups(n Nightly, now time.Time) []Result {
 	switch {
 	case len(failed) > 0:
 		r.Status, r.Summary = Crit, human.Plural(len(failed), "failed", "failed")
-		r.Detail = append(r.Detail, "The last nightly backup failed for "+strings.Join(failed, ", ")+". Open the app's backups to try again.")
+		r.Detail = append(r.Detail, "The last scheduled backup failed for "+strings.Join(failed, ", ")+". Open the app's backups to try again.")
 	case len(stale) > 0:
 		r.Status, r.Summary = Warn, "missed"
-		r.Detail = append(r.Detail, "No backup in over a day for "+strings.Join(stale, ", ")+". The server may have been off or busy at "+n.At+"; a backup is only started within two hours of that time.")
+		over := "over a day"
+		if n.Every > 1 {
+			over = "over " + human.Plural(n.Every, "day", "days")
+		}
+		r.Detail = append(r.Detail, "No backup in "+over+" for "+strings.Join(stale, ", ")+". The server may have been off or busy at "+n.At+"; a backup is only started within two hours of that time.")
 	case len(uncopied) > 0:
 		r.Status, r.Summary = Warn, "not copied off"
 		r.Detail = append(r.Detail, "The backups were made, but copying them off the server failed for "+strings.Join(uncopied, ", ")+". If this server is lost, so are they.")
 	case len(good) == 0:
 		r.Status, r.Summary = Info, "first at "+n.At
-		r.Detail = append(r.Detail, "The first nightly backup of "+strings.Join(never, ", ")+" runs at "+n.At+".")
+		r.Detail = append(r.Detail, "The first scheduled backup of "+strings.Join(never, ", ")+" runs at "+n.At+".")
 	default:
 		r.Summary = human.Plural(len(good), "app", "apps") + " backed up"
 		if len(never) > 0 {

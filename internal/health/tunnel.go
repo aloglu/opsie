@@ -12,6 +12,22 @@ import (
 	"github.com/aloglu/opsie/internal/sites"
 )
 
+// OriginDown reports whether a hostname cloudflared failed to reach is
+// still down. Its log only says when requests failed, never that they
+// work again, so a failure counts for an hour, unless a visit to the site
+// since the last one found it answering.
+func OriginDown(o priv.OriginError, visits []sites.Result) bool {
+	if o.Recent == 0 {
+		return false
+	}
+	for _, s := range visits {
+		if s.Host == o.Host && s.Up() && s.At.After(o.Last) {
+			return false
+		}
+	}
+	return true
+}
+
 // tunnels checks each Cloudflare Tunnel connector: that it runs, that it's
 // connected, and that the apps behind its hostnames answer.
 func tunnels(f facts.Facts) []Result {
@@ -23,7 +39,7 @@ func tunnels(f facts.Facts) []Result {
 		}
 		var down []string
 		for _, o := range t.Origins {
-			if o.Recent > 0 {
+			if OriginDown(o, f.Sites) {
 				down = append(down, o.Host)
 			}
 		}
@@ -41,7 +57,7 @@ func tunnels(f facts.Facts) []Result {
 				r.Summary = human.Plural(len(down), "site", "sites") + " down"
 			}
 			for _, o := range t.Origins {
-				if o.Recent > 0 {
+				if OriginDown(o, f.Sites) {
 					r.Detail = append(r.Detail, fmt.Sprintf("%s: %s (%s in the last hour).", o.Host, o.Error, human.Plural(o.Recent, "failed request", "failed requests")))
 				}
 			}

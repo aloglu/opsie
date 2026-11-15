@@ -236,6 +236,11 @@ func (m *Model) dockerItems() []string {
 	for _, a := range m.idleApps() {
 		ids = append(ids, "app:"+a.dir)
 	}
+	if len(m.facts.Containers) == 0 {
+		// Nothing runs here: a new server, perhaps, with backups to bring
+		// its apps back from.
+		ids = append(ids, "restoreall")
+	}
 	return ids
 }
 
@@ -309,6 +314,13 @@ func (m *Model) dockerPage(w int) block {
 	}
 	if idle := m.idleApps(); len(idle) > 0 {
 		builds = append(builds, func(inner int) cardSpec { return m.sectionCard(tabDocker, m.idleSection(idle, inner), inner, selected) })
+	}
+	if len(m.facts.Containers) == 0 {
+		builds = append(builds, func(inner int) cardSpec {
+			s := section{title: "Starting over", entries: []entry{{id: "restoreall", lines: m.action("Restore apps from backups", inner)}}}
+			s.outro = wrap(m.th.dim.Render("Nothing runs here yet. If this server takes over from another, its apps can be brought back from their backups."), inner)
+			return m.sectionCard(tabDocker, s, inner, selected)
+		})
 	}
 	return masonry(m, w, builds)
 }

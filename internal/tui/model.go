@@ -46,6 +46,10 @@ type Model struct {
 	cron cronState
 	// bk is what's in the backup folder.
 	bk backupsState
+	// appSizes is how much each app has to back up, by project.
+	appSizes map[string]appSize
+	// move is the last run of Back up everything or Restore from backups.
+	mv *moveState
 	// audit is the action log, as last read.
 	audit auditCache
 	// net is the interfaces and speed tests; agents the AI agents' usage.
@@ -358,6 +362,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case copyDoneMsg:
 		return m, m.copyDone(msg)
+	case appSizeMsg:
+		m.appMeasured(msg)
+		return m, nil
+	case moveDoneMsg:
+		return m, m.moveDone(msg)
 	case dockerMsg:
 		return m, m.dockerUpdated(msg)
 

@@ -142,6 +142,10 @@ func (m *Model) historyCharts(kind string, b *detailBuilder) {
 	}
 	now := m.now
 	w := b.inner
+	style := m.chartStyle(map[string]string{"cpu": "cpu", "mem": "memory", "swap": "memory", "net": "network"}[kind])
+	if kind == "io" || strings.HasPrefix(kind, "disk:") {
+		style = m.chartStyle("disk")
+	}
 	for _, span := range []struct {
 		name string
 		d    time.Duration
@@ -170,7 +174,7 @@ func (m *Model) historyCharts(kind string, b *detailBuilder) {
 				}
 			}
 			b.row(t.subtle.Render(fit(stats, w)))
-			buckets := history.Buckets(h.samples, from, now, w, l.pick)
+			buckets := history.Buckets(h.samples, from, now, w*perColumn(style), l.pick)
 			values := make([]float64, len(buckets))
 			for i, bk := range buckets {
 				if bk.N > 0 {
@@ -178,7 +182,7 @@ func (m *Model) historyCharts(kind string, b *detailBuilder) {
 				}
 			}
 			color := func(v float64) colorT { return l.color(v + base) }
-			for _, row := range t.chart(values, w, 3, top-base, color) {
+			for _, row := range t.plot(style, values, w, 3, top-base, color) {
 				b.body = append(b.body, row)
 			}
 		}

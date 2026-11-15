@@ -29,6 +29,89 @@ type backupsState struct {
 	err     string
 }
 
+// appSize is how much an app has to back up, measured when its Backups
+// screen opens.
+type appSize struct {
+	loading bool
+	at      time.Time
+	bytes   uint64
+	ok      bool
+}
+
+type appSizeMsg struct {
+	project string
+	bytes   uint64
+	err     error
+}
+
+// measureApp adds up an app's folder and volumes, unless that was done a
+// little while ago.
+func (m *Model) measureApp(project string) tea.Cmd {
+	if m.admin == nil || !m.admin.Alive() || project == "" {
+		return nil
+	}
+	if m.appSizes == nil {
+		m.appSizes = map[string]appSize{}
+	}
+	if s := m.appSizes[project]; s.loading || (!s.at.IsZero() && time.Since(s.at) < 10*time.Minute) {
+		return nil
+	}
+	m.appSizes[project] = appSize{loading: true}
+	admin := m.admin
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		var out priv.BackupSize
+		err := admin.Call(ctx, "backup.size", map[string]string{"project": project}, &out)
+		return appSizeMsg{project: project, bytes: out.Bytes, err: err}
+	}
+}
+
+func (m *Model) appMeasured(msg appSizeMsg) {
+	m.appSizes[msg.project] = appSize{at: time.Now(), bytes: msg.bytes, ok: msg.err == nil}
+}
+
+// backupsTotal adds up the backups in the folder: of one app, or of all
+// when project is "".
+func (m *Model) backupsTotal(project string) (n int, bytes uint64) {
+	for _, bk := range m.bk.b.List {
+		if project == "" || bk.Project == project {
+			n++
+			bytes += bk.Size
+		}
+	}
+	return n, bytes
+}
+
+// schedule says how often the scheduled backups run.
+func schedule(cfg config.Backup) string {
+	switch cfg.EveryDays {
+	case 0, 1:
+		return "every night"
+	case 7:
+		return "once a week"
+	}
+	return "every " + strconv.Itoa(cfg.EveryDays) + " days"
+}
+
+// offServerCost says what copies off the server add up to, for someone
+// paying for the space: per copy, per week on the schedule, and whether
+// anything ever clears the old ones. per is one backup's size.
+func offServerCost(cfg config.Backup, per uint64, scheduled bool) string {
+	if per == 0 {
+		return ""
+	}
+	out := "Each copy off the server is about " + human.Bytes(per) + "."
+	if scheduled {
+		weekly := per * 7 / uint64(max(cfg.EveryDays, 1))
+		out = "Each copy off the server is about " + human.Bytes(per) + ": about " + human.Bytes(weekly) + " a week, backed up " + schedule(cfg) + "."
+	}
+	if cfg.KeepRemote > 0 {
+		return out + " opsie keeps the last " + strconv.Itoa(cfg.KeepRemote) + " there, about " + human.Bytes(per*uint64(cfg.KeepRemote)) + " in all."
+	}
+	return out + " Nothing clears the old ones there, so it keeps growing; set Keep off the server in Settings to cap it."
+}
+
 type backupsMsg struct {
 	b   priv.Backups
 	err error
@@ -294,19 +377,41 @@ func (m *Model) backupDetail(project string, b *detailBuilder) detail {
 	b.kv("Encryption", enc)
 	b.kv("Saved in", tildePath(m.backupDir())+t.dim.Render(" · keeps the last "+human.Plural(m.env.Config.Backup.Keep, "backup", "backups")))
 	cfg := m.env.Config.Backup
+	// What it costs in space, before any backup is made: the app's data
+	// now, and what the kept backups add up to.
+	var dataNow uint64
+	switch s := m.appSizes[project]; {
+	case s.loading:
+		b.kv("App's data", t.dim.Render("measuring…"))
+	case s.ok:
+		dataNow = s.bytes
+		b.kv("App's data", human.Bytes(s.bytes)+t.dim.Render(" now · a backup is compressed, so usually smaller"))
+	}
+	count, total := m.backupsTotal(project)
+	var per uint64
+	if count > 0 {
+		per = m.projectBackups(project)[0].Size
+		b.kv("Backups here", human.Bytes(total)+t.dim.Render(" · "+human.Plural(count, "backup", "backups")))
+	} else if dataNow > 0 {
+		per = dataNow
+		b.kv("Backups here", "none yet"+t.dim.Render(" · up to "+human.Bytes(dataNow*uint64(cfg.Keep))+" with "+strconv.Itoa(cfg.Keep)+" kept"))
+	}
 	if offsite.Configured(cfg) {
 		b.kv("Copies to", strings.Join(offsite.Where(cfg), ", "))
 		if cfg.EncryptTo == "" {
 			b.text("Copies leave the server unencrypted. Turn on encryption in Settings so whoever holds them can't read your data.", t.warnText)
 		}
+		if cost := offServerCost(cfg, per, slices.Contains(cfg.Nightly, project)); cost != "" {
+			b.text(cost, t.subtle)
+		}
 	} else {
 		b.kv("Copies to", "only this server"+t.dim.Render(" · set up copies in Settings"))
 	}
 	nightlyOn := slices.Contains(cfg.Nightly, project)
-	nightly := health.Fix{Label: "Back up every night", Special: "config:add", Args: map[string]string{"key": "backup.nightly", "value": project},
-		Done: project + " is backed up every night at " + cfg.At}
+	nightly := health.Fix{Label: "Back up on a schedule", Special: "config:add", Args: map[string]string{"key": "backup.nightly", "value": project},
+		Done: project + " is backed up " + schedule(cfg) + " at " + cfg.At}
 	if nightlyOn {
-		word := "on · " + cfg.At
+		word := schedule(cfg) + " · " + cfg.At
 		for _, r := range m.watcher.Backups {
 			if r.Project != project {
 				continue
@@ -317,12 +422,12 @@ func (m *Model) backupDetail(project string, b *detailBuilder) detail {
 				word += t.dangerText.Render(" · last one failed")
 			}
 		}
-		b.kv("Nightly", word)
+		b.kv("Scheduled", word)
 		if !m.watcher.Running(m.now) {
-			b.text("Nightly backups are run by the background checks, which aren't running.", t.warnText)
+			b.text("Scheduled backups are run by the background checks, which aren't running.", t.warnText)
 		}
-		nightly = health.Fix{Label: "Stop nightly backups", Special: "config:remove", Args: map[string]string{"key": "backup.nightly", "value": project},
-			Done: project + " isn't backed up every night anymore"}
+		nightly = health.Fix{Label: "Stop scheduled backups", Special: "config:remove", Args: map[string]string{"key": "backup.nightly", "value": project},
+			Done: project + " isn't backed up on a schedule anymore"}
 	}
 
 	var fixes []health.Fix

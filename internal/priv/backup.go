@@ -70,6 +70,37 @@ type Backups struct {
 type RestoreResult struct {
 	Aside   []string `json:"aside"`
 	Started bool     `json:"started"`
+	// Folder is where the app's folder went, which on another server
+	// isn't always where it came from.
+	Folder string `json:"folder"`
+	// Held is whether the app was left stopped because it's the tunnel:
+	// started here while it still runs on the old server, visitors would
+	// be sent to both.
+	Held bool `json:"held,omitempty"`
+}
+
+// restoreTarget is where a backup's folder goes. That's where it came
+// from, unless the folder that was in isn't on this server, as when the
+// backup is from a server with another user: then it goes into apps, the
+// folder this server keeps its apps in.
+func restoreTarget(folder, apps string) string {
+	if apps == "" || !filepath.IsAbs(apps) {
+		return folder
+	}
+	if _, err := os.Stat(filepath.Dir(folder)); err == nil {
+		return folder
+	}
+	return filepath.Join(filepath.Clean(apps), filepath.Base(folder))
+}
+
+// isTunnel reports whether the app in folder runs cloudflared.
+func isTunnel(folder string) bool {
+	file := FindCompose(folder)
+	if file == "" {
+		return false
+	}
+	data, err := os.ReadFile(file)
+	return err == nil && strings.Contains(string(data), "cloudflare/cloudflared")
 }
 
 var (
@@ -363,6 +394,29 @@ func opBackupCreate(ctx context.Context, args map[string]string) (any, error) {
 	return info, nil
 }
 
+// BackupSize is how much an app has to back up.
+type BackupSize struct {
+	// Bytes is what its folder and volumes take up now. A backup is
+	// compressed, so it's usually smaller.
+	Bytes uint64 `json:"bytes"`
+}
+
+// opBackupSize adds up an app's folder and volumes, so what its backups
+// will take can be said before any is made.
+func opBackupSize(ctx context.Context, args map[string]string) (any, error) {
+	p, err := readProject(ctx, args["project"])
+	if err != nil {
+		return nil, err
+	}
+	trees := []backup.Tree{{Prefix: "folder", Path: p.folder}}
+	for _, v := range p.volumes {
+		if mp, err := volumePath(ctx, v); err == nil {
+			trees = append(trees, backup.Tree{Prefix: "volumes/" + v, Path: mp})
+		}
+	}
+	return BackupSize{Bytes: backup.Size(trees)}, nil
+}
+
 // writeFile writes a backup and returns its checksum.
 func writeFile(path string, m backup.Manifest, trees []backup.Tree, recipient string) (string, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -648,24 +702,32 @@ func opBackupRestore(ctx context.Context, args map[string]string) (any, error) {
 		return nil, err
 	}
 	defer f.Close()
+	var target string
 	m, err := backup.Extract(f, key, func(m backup.Manifest) (map[string]string, error) {
 		if m.Project != args["project"] {
 			return nil, fmt.Errorf("this backup is of %s, not %s", m.Project, args["project"])
 		}
-		if err := restoreFolder(m.Folder); err != nil {
+		target = restoreTarget(m.Folder, args["apps"])
+		if err := restoreFolder(target); err != nil {
 			return nil, err
 		}
-		if err := os.MkdirAll(filepath.Dir(m.Folder), 0o755); err != nil {
-			return nil, err
+		if _, err := os.Stat(filepath.Dir(target)); errors.Is(err, fs.ErrNotExist) {
+			// A folder for apps that isn't there yet is the caller's, like
+			// the one it stands in for.
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return nil, err
+			}
+			uid, gid := owner(caller(args))
+			_ = os.Chown(filepath.Dir(target), uid, gid)
 		}
 		need := m.Bytes + 256<<20
-		if free := freeAt(filepath.Dir(m.Folder)); free < need {
+		if free := freeAt(filepath.Dir(target)); free < need {
 			return nil, fmt.Errorf("not enough room to restore: it needs about %s and %s is free", bytesWord(need), bytesWord(free))
 		}
 		dirs := map[string]string{}
-		folderStage := filepath.Join(filepath.Dir(m.Folder), "."+filepath.Base(m.Folder)+".opsie-restore-"+stamp)
+		folderStage := filepath.Join(filepath.Dir(target), "."+filepath.Base(target)+".opsie-restore-"+stamp)
 		dirs["folder"] = folderStage
-		swaps = append(swaps, swap{staged: folderStage, live: m.Folder, aside: m.Folder + ".before-restore-" + stamp})
+		swaps = append(swaps, swap{staged: folderStage, live: target, aside: target + ".before-restore-" + stamp})
 		for _, v := range m.Volumes {
 			mp, err := volumePath(ctx, v)
 			if err != nil {
@@ -701,6 +763,8 @@ func opBackupRestore(ctx context.Context, args map[string]string) (any, error) {
 		}
 		return nil, fmt.Errorf("nothing was changed: %w", err)
 	}
+
+	m.Folder = target
 
 	// Stop the app, swap its data for the backup's, start it again.
 	running, haveContainers, err := projectRunning(ctx, m.Project)
@@ -750,7 +814,7 @@ func opBackupRestore(ctx context.Context, args map[string]string) (any, error) {
 		_ = startAgain(running)
 		return nil, errors.New("nothing was changed: couldn't move the restored files into place")
 	}
-	var res RestoreResult
+	res := RestoreResult{Folder: m.Folder}
 	for _, s := range applied {
 		if s.aside != "" {
 			res.Aside = append(res.Aside, s.aside)
@@ -784,6 +848,8 @@ func opBackupRestore(ctx context.Context, args map[string]string) (any, error) {
 			return res, fmt.Errorf("restored, but the app didn't start again: %w", err)
 		}
 		res.Started = true
+	case !haveContainers && args["hold"] == "1" && isTunnel(m.Folder):
+		res.Held = true
 	case !haveContainers:
 		// No containers anymore: bring the app up from its folder.
 		if docker, err := lookPath("docker"); err == nil && FindCompose(m.Folder) != "" {

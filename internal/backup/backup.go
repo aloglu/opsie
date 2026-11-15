@@ -5,6 +5,7 @@ package backup
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"errors"
@@ -477,6 +478,38 @@ func decrypt(r io.Reader, identity string) (io.Reader, error) {
 }
 
 const ageMagic = "age-encryption.org/v1"
+
+// Seal encrypts a small file, like opsie's settings, to a public key.
+func Seal(data []byte, recipient string) ([]byte, error) {
+	to, err := ParseRecipient(recipient)
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	w, err := age.Encrypt(&out, to)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := w.Write(data); err != nil {
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+// Open decrypts what Seal made, with the secret key.
+func Open(sealed []byte, identity string) ([]byte, error) {
+	if !bytes.HasPrefix(sealed, []byte(ageMagic)) {
+		return nil, errors.New("this isn't an encrypted file")
+	}
+	r, err := decrypt(bytes.NewReader(sealed), identity)
+	if err != nil {
+		return nil, err
+	}
+	return io.ReadAll(io.LimitReader(r, 4<<20))
+}
 
 // NewKey makes a key pair: the secret key that opens backups, and the
 // public key they're encrypted to.

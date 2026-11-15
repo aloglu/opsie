@@ -298,7 +298,7 @@ func (m *Model) cpuCard(inner int) cardSpec {
 	// What's written goes above a chart, in every card, so nothing sits
 	// between the chart and the card's edge.
 	s.body = append(s.body, line)
-	s.body = append(s.body, t.chart(m.cpu, inner, 4+m.grow+m.pad, 100, func(v float64) colorT { return t.level(t.cpu, v, 80, 95) })...)
+	s.body = append(s.body, t.plot(m.chartStyle("cpu"), m.cpu, inner, 4+m.grow+m.pad, 100, func(v float64) colorT { return t.level(t.cpu, v, 80, 95) })...)
 	return s
 }
 
@@ -326,7 +326,7 @@ func (m *Model) memCard(inner int) cardSpec {
 	} else {
 		s.body = append(s.body, t.subtle.Render("Swap ")+t.dim.Render("none"))
 	}
-	s.body = append(s.body, t.chart(m.mem, inner, 3+m.grow+m.pad, 100, func(v float64) colorT { return t.level(t.mem, v, th.MemoryWarn, th.MemoryCrit) })...)
+	s.body = append(s.body, t.plot(m.chartStyle("memory"), m.mem, inner, 3+m.grow+m.pad, 100, func(v float64) colorT { return t.level(t.mem, v, th.MemoryWarn, th.MemoryCrit) })...)
 	return s
 }
 
@@ -342,7 +342,7 @@ func (m *Model) netCard(inner int) cardSpec {
 		s.badge = t.dim.Render(strings.Join(n.Interfaces, " "))
 	}
 	s.body = []string{m.sinceBoot(fmt.Sprintf("↓ %s  ↑ %s", human.Bytes(n.RxTotal), human.Bytes(n.TxTotal)), inner)}
-	s.body = append(s.body, m.flowCharts(inner, 4+m.grow+m.pad,
+	s.body = append(s.body, m.flowCharts("network", inner, 4+m.grow+m.pad,
 		flow{mark: "↓", c: t.rx, past: m.rx, rate: n.RxRate},
 		flow{mark: "↑", c: t.tx, past: m.tx, rate: n.TxRate})...)
 	return s
@@ -378,7 +378,7 @@ func (m *Model) diskCard(inner int) cardSpec {
 	s.open = "history:io"
 	s.badge = t.dim.Render(fmt.Sprintf("%.0f%% busy", io.Busy))
 	s.body = []string{m.sinceBoot(fmt.Sprintf("R %s  W %s", human.Bytes(io.ReadTotal), human.Bytes(io.WriteTotal)), inner)}
-	s.body = append(s.body, m.flowCharts(inner, 4+m.grow+m.pad,
+	s.body = append(s.body, m.flowCharts("disk", inner, 4+m.grow+m.pad,
 		flow{mark: "R", c: t.disk, past: m.rd, rate: io.ReadRate},
 		flow{mark: "W", c: t.wr, past: m.wr, rate: io.WriteRate})...)
 	return s
@@ -397,7 +397,8 @@ type flow struct {
 // wide as the card, under a line that has each one's mark, in its color,
 // and its latest value. They share rows evenly, so they read against
 // each other; a row that's left over goes between them.
-func (m *Model) flowCharts(inner, rows int, flows ...flow) []string {
+func (m *Model) flowCharts(reading string, inner, rows int, flows ...flow) []string {
+	style := m.chartStyle(reading)
 	var now []string
 	for _, f := range flows {
 		now = append(now, lipgloss.NewStyle().Foreground(f.c).Bold(true).Render(f.mark)+" "+human.Rate(f.rate))
@@ -410,7 +411,7 @@ func (m *Model) flowCharts(inner, rows int, flows ...flow) []string {
 	rows /= len(flows)
 	top := 1024.0
 	for _, f := range flows {
-		for _, v := range f.past[max(len(f.past)-inner, 0):] {
+		for _, v := range f.past[max(len(f.past)-inner*perColumn(style), 0):] {
 			top = max(top, v)
 		}
 	}
@@ -420,7 +421,7 @@ func (m *Model) flowCharts(inner, rows int, flows ...flow) []string {
 				body = append(body, "")
 			}
 		}
-		body = append(body, m.th.chart(f.past, inner, rows, top, func(float64) colorT { return f.c })...)
+		body = append(body, m.th.plot(style, f.past, inner, rows, top, func(float64) colorT { return f.c })...)
 	}
 	return body
 }

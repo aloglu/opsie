@@ -416,3 +416,29 @@ func hasFix(r Result, op string, danger bool) bool {
 	}
 	return false
 }
+
+// A site cloudflared couldn't reach stops counting as down once a visit
+// after the last failure finds it answering.
+func TestTunnelSiteComesBack(t *testing.T) {
+	now := time.Now()
+	f := facts.Facts{Tunnels: []priv.Tunnel{{
+		Name: "cloudflared", Running: true, HaveReady: true, Ready: 4,
+		Origins: []priv.OriginError{{Host: "site.example.com", Count: 9, Recent: 9, Last: now.Add(-10 * time.Minute), Error: "nothing is listening on the app's port"}},
+	}}}
+	status := func() Status { return tunnels(f)[0].Status }
+	if status() != Warn {
+		t.Fatalf("a failing site with no visit: %v", status())
+	}
+	f.Sites = []sites.Result{{URL: "https://site.example.com", Host: "site.example.com", At: now.Add(-20 * time.Minute), Status: 200}}
+	if status() != Warn {
+		t.Errorf("a visit from before the failures cleared it: %v", status())
+	}
+	f.Sites[0].At = now.Add(-time.Minute)
+	if status() != OK {
+		t.Errorf("answering again, but still %v", status())
+	}
+	f.Sites[0].Status = 502
+	if status() != Warn {
+		t.Errorf("a visit that failed cleared it: %v", status())
+	}
+}
