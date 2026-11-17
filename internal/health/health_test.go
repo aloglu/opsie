@@ -304,20 +304,40 @@ func TestSitesCheck(t *testing.T) {
 		{URL: "https://a.example.com", Host: "a.example.com", Route: true, Status: 200, Took: 100 * time.Millisecond},
 		{URL: "https://b.example.com", Host: "b.example.com", Status: 200, Took: 100 * time.Millisecond},
 	}}
-	cfg := config.Sites{Check: true, SlowSeconds: 5}
+	cfg := config.Sites{Check: true, SlowSeconds: 5, AlertAfterMinutes: 2}
 	if rs := sitesCheck(f, cfg); len(rs) != 1 || rs[0].ID != "sites" || rs[0].Status != OK {
 		t.Fatalf("all fine: %+v", rs)
 	}
+	now := time.Now()
+	// badFor makes both sites' runs of bad visits d long so far.
+	badFor := func(d time.Duration) {
+		for i := range f.Sites {
+			f.Sites[i].At, f.Sites[i].BadSince = now, now.Add(-d)
+		}
+	}
 	f.Sites[0].Status = 502
 	f.Sites[1].Took = 8 * time.Second
+	badFor(0)
 	rs := sitesCheck(f, cfg)
+	if len(rs) != 2 || rs[0].Status != Info || !strings.Contains(rs[0].Summary, "checking again") || rs[1].Status != Info || !strings.Contains(rs[1].Summary, "slow") {
+		t.Fatalf("one bad visit is only a blip: %+v", rs)
+	}
+	badFor(time.Minute + 50*time.Second)
+	if rs := sitesCheck(f, cfg); rs[0].Status != Info || rs[1].Status != Info {
+		t.Fatalf("under two minutes is still a blip with two minutes set: %+v", rs)
+	}
+	if rs := sitesCheck(f, config.Sites{SlowSeconds: 5}); rs[0].Status != Crit || rs[1].Status != Warn {
+		t.Fatalf("0 minutes counts the first bad visit: %+v", rs)
+	}
+	badFor(2 * time.Minute)
+	rs = sitesCheck(f, cfg)
 	if len(rs) != 2 || rs[0].Status != Crit || rs[0].ID != "site:https://a.example.com" || rs[1].Status != Warn || !strings.Contains(rs[1].Summary, "slow") {
 		t.Fatalf("problems: %+v", rs)
 	}
 	if rs[0].Fixes[0].Special != "open:docker:route:a.example.com" {
 		t.Errorf("fix %+v", rs[0].Fixes)
 	}
-	f.Sites[1].Took, f.Sites[1].CertExpires = time.Second, time.Now().Add(3*24*time.Hour)
+	f.Sites[1].Took, f.Sites[1].BadSince, f.Sites[1].CertExpires = time.Second, time.Time{}, time.Now().Add(3*24*time.Hour)
 	if rs := sitesCheck(f, cfg); !strings.Contains(rs[1].Summary, "certificate") {
 		t.Errorf("cert: %+v", rs[1])
 	}

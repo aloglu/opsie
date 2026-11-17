@@ -100,10 +100,8 @@ func sitesCheck(f facts.Facts, cfg config.Sites) []Result {
 	if len(f.Sites) == 0 {
 		return nil
 	}
-	slow := time.Duration(cfg.SlowSeconds * float64(time.Second))
-	if slow <= 0 {
-		slow = 5 * time.Second
-	}
+	slow := cfg.Slow()
+	after := cfg.AlertAfter()
 	var out []Result
 	for _, s := range f.Sites {
 		r := Result{ID: "site:" + s.URL, Title: s.Host, Fixes: siteFixes(s)}
@@ -112,6 +110,18 @@ func sitesCheck(f facts.Facts, cfg config.Sites) []Result {
 			days = int(time.Until(s.CertExpires).Hours() / 24)
 		}
 		switch {
+		case s.Bad() && s.BadFor() < after:
+			// A bad visit is usually a blip, so it's visited again soon
+			// and only counts once the trouble has lasted. It's timed
+			// rather than counted, since visits come with the checks.
+			r.Status = Info
+			r.Summary = "slow · checking again"
+			r.Detail = []string{fmt.Sprintf("It took %s to answer; more than %s counts as slow.", human.Seconds(s.Took), human.Seconds(slow))}
+			if !s.Up() {
+				r.Summary = "didn't answer · checking again"
+				r.Detail = []string{s.URL + " didn't work on the last visit: " + s.Problem() + "."}
+			}
+			r.Detail = append(r.Detail, "That's often a moment's blip, so opsie visits again every "+human.Duration(sites.Recheck)+" and only counts it as a problem once it's lasted "+human.Duration(after)+".")
 		case !s.Up():
 			r.Status, r.Summary = Crit, "down"
 			r.Detail = []string{s.URL + " doesn't work for visitors: " + s.Problem() + "."}

@@ -117,3 +117,37 @@ func TestOpenRouterKeyIsOneOrSeveral(t *testing.T) {
 		t.Errorf("values: %#v", cfg.Values()["agents.openrouter_key"])
 	}
 }
+
+func TestSiteAlertAfter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	for text, want := range map[string]int{
+		"":                                    2, // the default
+		"[sites]\nalert_after_minutes = 0\n":  0, // first bad visit
+		"[sites]\nalert_after_minutes = 10\n": 10,
+		"[sites]\nalert_after_minutes = 99\n": 2, // out of range
+		"[sites]\nalert_after_minutes = -1\n": 2,
+	} {
+		os.WriteFile(path, []byte(text), 0o600)
+		cfg, err := Load(path)
+		if err != nil || cfg.Sites.AlertAfterMinutes != want || cfg.Sites.AlertAfter() != time.Duration(want)*time.Minute {
+			t.Errorf("%q: got %d %v, want %d", text, cfg.Sites.AlertAfterMinutes, err, want)
+		}
+	}
+}
+
+func TestSiteVisitMinutes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	for text, want := range map[string]int{
+		"":                              2, // the default
+		"[sites]\nvisit_minutes = 1\n":  1,
+		"[sites]\nvisit_minutes = 15\n": 15,
+		"[sites]\nvisit_minutes = 0\n":  2, // out of range
+		"[sites]\nvisit_minutes = 61\n": 2,
+	} {
+		os.WriteFile(path, []byte(text), 0o600)
+		cfg, err := Load(path)
+		if err != nil || cfg.Sites.VisitMinutes != want || cfg.Sites.Visit() != time.Duration(want)*time.Minute {
+			t.Errorf("%q: got %d %v, want %d", text, cfg.Sites.VisitMinutes, err, want)
+		}
+	}
+}

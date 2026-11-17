@@ -496,7 +496,7 @@ func (m *Model) siteDetail(url string, b *detailBuilder) detail {
 	st, word := health.OK, "up"
 	if !s.Up() {
 		st, word = health.Crit, "down"
-		b.text("Visitors can't use it right now. opsie checks again every "+human.Duration(sites.Every)+".", t.dangerText)
+		b.text("Visitors can't use it right now. opsie checks again every "+human.Duration(sites.Recheck)+".", t.dangerText)
 	}
 	b.text("You added this one in Settings. opsie visits it like a browser would and only looks at whether it answers.", t.subtle)
 	return detail{title: s.Host, headline: headline(t, st, word, ""), body: b.body,

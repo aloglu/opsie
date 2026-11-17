@@ -259,6 +259,30 @@ type Sites struct {
 	Extra []string `toml:"extra"`
 	// SlowSeconds is how long an answer takes before it's a warning.
 	SlowSeconds float64 `toml:"slow_seconds"`
+	// VisitMinutes is how often each site is visited while it's fine.
+	VisitMinutes int `toml:"visit_minutes"`
+	// AlertAfterMinutes is how long a site must stay down or slow before
+	// it counts as a problem and sends an alert; 0 counts the first bad
+	// visit.
+	AlertAfterMinutes int `toml:"alert_after_minutes"`
+}
+
+// Visit is how often each site is visited while it's fine.
+func (s Sites) Visit() time.Duration {
+	return time.Duration(max(s.VisitMinutes, 1)) * time.Minute
+}
+
+// AlertAfter is how long a site must stay down or slow before it counts.
+func (s Sites) AlertAfter() time.Duration {
+	return time.Duration(s.AlertAfterMinutes) * time.Minute
+}
+
+// Slow is how long an answer takes before it counts as slow.
+func (s Sites) Slow() time.Duration {
+	if s.SlowSeconds <= 0 {
+		return 5 * time.Second
+	}
+	return time.Duration(s.SlowSeconds * float64(time.Second))
 }
 
 // Notify says where the background checks send alerts, and when.
@@ -346,7 +370,7 @@ func Default() Config {
 			LoadWarn: 1.5, LoadCrit: 3,
 		},
 		Notify:     Notify{Level: "warn", RepeatHours: 12, Logins: "new"},
-		Sites:      Sites{Check: true, SlowSeconds: 5},
+		Sites:      Sites{Check: true, SlowSeconds: 5, VisitMinutes: 2, AlertAfterMinutes: 2},
 		Images:     Images{Check: true},
 		Agents:     Agents{Check: true, LowPercent: 10, LowBalance: 1},
 		Theme:      "opsie",
@@ -424,6 +448,12 @@ func (c *Config) clamp() {
 	}
 	if c.Sites.SlowSeconds < 0.5 || c.Sites.SlowSeconds > 60 {
 		c.Sites.SlowSeconds = d.Sites.SlowSeconds
+	}
+	if c.Sites.VisitMinutes < 1 || c.Sites.VisitMinutes > 60 {
+		c.Sites.VisitMinutes = d.Sites.VisitMinutes
+	}
+	if c.Sites.AlertAfterMinutes < 0 || c.Sites.AlertAfterMinutes > 30 {
+		c.Sites.AlertAfterMinutes = d.Sites.AlertAfterMinutes
 	}
 	if c.Agents.LowPercent < 0 || c.Agents.LowPercent > 100 {
 		c.Agents.LowPercent = d.Agents.LowPercent

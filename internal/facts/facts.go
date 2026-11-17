@@ -367,7 +367,7 @@ func (f *Facts) CheckOnline(ctx context.Context, cfg config.Config) {
 		defer wg.Done()
 		f.Sites = nil
 		if cfg.Sites.Check {
-			f.Sites = sites.Check(ctx, sites.Targets(f.Tunnels, cfg.Sites.Extra))
+			f.Sites = sites.Check(ctx, sites.Targets(f.Tunnels, cfg.Sites.Extra), sites.Options{Every: cfg.Sites.Visit(), Slow: cfg.Sites.Slow()})
 		}
 	}()
 	go func() {

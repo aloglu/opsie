@@ -54,9 +54,11 @@ low_percent = 10        # percent of a key's limit or the account's credits left
 low_balance = 1         # a balance, in the account's currency, that counts as low; 0 for never
 
 [sites]
-check = true            # visit every tunnel hostname every two minutes
+check = true            # visit every tunnel hostname
 extra = []              # more addresses, like ["https://example.com"]
+visit_minutes = 2       # how often each site is visited while it's fine
 slow_seconds = 5
+alert_after_minutes = 2 # how long a site stays down or slow before it alerts; 0 = first bad visit
 
 [thresholds]            # percentages, except load (per CPU core)
 disk_warn = 85

@@ -20,8 +20,11 @@ import (
 	"github.com/aloglu/opsie/internal/priv"
 )
 
-// Every is how often each site is checked; results in between are reused.
-const Every = 2 * time.Minute
+// Recheck is how often a site that's failing or slow is visited, however
+// long the usual wait between visits is, to see whether it was a moment's
+// blip, like a container restarting or updating, a cold start, or a
+// dropped connection.
+const Recheck = time.Minute
 
 // Result is one check of one site.
 type Result struct {
@@ -37,6 +40,21 @@ type Result struct {
 	Err string `json:"err,omitempty"`
 	// CertExpires is when the site's certificate runs out.
 	CertExpires time.Time `json:"cert_expires,omitzero"`
+	// BadSince is when the run of down or slow visits that this one ends
+	// began: the first of them; zero when this visit was fine.
+	BadSince time.Time `json:"bad_since,omitzero"`
+}
+
+// Bad reports whether this visit found the site down or slow.
+func (r Result) Bad() bool { return !r.BadSince.IsZero() }
+
+// BadFor is how long the site has been down or slow, from the first bad
+// visit in a row to this one: 0 on the first.
+func (r Result) BadFor() time.Duration {
+	if !r.Bad() {
+		return 0
+	}
+	return r.At.Sub(r.BadSince)
 }
 
 // Up reports whether the site answered with something other than a
@@ -99,8 +117,17 @@ var cache = struct {
 	results map[string]Result
 }{results: map[string]Result{}}
 
-// Check visits each target, reusing results younger than Every.
-func Check(ctx context.Context, targets []Target) []Result {
+// Options say how often sites are visited and what counts as slow.
+type Options struct {
+	// Every is how long a visit's result is reused while the site is fine.
+	Every time.Duration
+	// Slow is how long an answer takes before it counts as slow.
+	Slow time.Duration
+}
+
+// Check visits each target, reusing results younger than opt.Every, or
+// than Recheck for a site that was down or slow last time.
+func Check(ctx context.Context, targets []Target, opt Options) []Result {
 	out := make([]Result, len(targets))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
@@ -108,11 +135,16 @@ func Check(ctx context.Context, targets []Target) []Result {
 		cache.Lock()
 		r, ok := cache.results[t.URL]
 		cache.Unlock()
-		if ok && time.Since(r.At) < Every {
+		life := opt.Every
+		if ok && r.Bad() {
+			life = min(Recheck, opt.Every)
+		}
+		if ok && time.Since(r.At) < life {
 			r.Route = t.Route
 			out[i] = r
 			continue
 		}
+		since := r.BadSince
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -120,6 +152,12 @@ func Check(ctx context.Context, targets []Target) []Result {
 			defer func() { <-sem }()
 			r := visit(ctx, t.URL)
 			r.Route = t.Route
+			if !r.Up() || (opt.Slow > 0 && r.Took > opt.Slow) {
+				r.BadSince = since
+				if r.BadSince.IsZero() {
+					r.BadSince = r.At
+				}
+			}
 			if ctx.Err() == nil {
 				cache.Lock()
 				cache.results[t.URL] = r

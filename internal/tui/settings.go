@@ -95,11 +95,15 @@ var settingGroups = []settingGroup{
 	}},
 	{"Sites", []setting{
 		{key: "sites.check", label: "Check sites", kind: "choice", options: []string{"on", "off"}, boolean: true,
-			help: "Visits every tunnel hostname and the extra sites every two minutes, like a visitor would, and warns when one doesn't answer or is slow."},
+			help: "Visits every tunnel hostname and the extra sites, like a visitor would, and warns when one doesn't answer or is slow."},
 		{key: "sites.extra", label: "Extra sites", kind: "urls", optional: true, placeholder: "https://example.com, https://status.example.com",
 			help: "More addresses to check, separated by commas: sites that aren't behind this server's tunnel, or a page deeper in one that is."},
+		{key: "sites.visit_minutes", label: "Visit every", kind: "number:1:60", integer: true,
+			help: "Minutes between visits to each site while it's fine. A site that's failing or slow is visited every minute instead, until it answers again."},
 		{key: "sites.slow_seconds", label: "Slow after", kind: "number:0.5:60",
 			help: "Seconds a site may take to answer before it's a warning."},
+		{key: "sites.alert_after_minutes", label: "Alert after", kind: "number:0:30", integer: true,
+			help: "Minutes a site must stay down or slow before it counts as a problem and sends an alert. A bad visit is often a blip, like a container restarting, so a failing site is visited again every minute until it answers. Higher means fewer alerts about blips, but you hear about real outages later. 0 alerts on the first bad visit."},
 	}},
 	{"Images", []setting{
 		{key: "images.check", label: "Look for new images", kind: "choice", options: []string{"on", "off"}, boolean: true,
